@@ -48,8 +48,13 @@ const ALsizei ResamplerPrePadding[RESAMPLER_MAX] = {
 
 static ALvoid InitSourceParams(ALsource *Source);
 static ALvoid GetSourceOffset(ALsource *Source, ALenum eName, ALdouble *Offsets, ALdouble updateLen);
-static ALint GetSampleOffset(ALsource *Source);
+static ALint GetByteOffset(ALsource *Source);
 
+#define LookupSource(m, k) ((ALsource*)LookupUIntMapKey(&(m), (k)))
+#define RemoveSource(m, k) ((ALsource*)PopUIntMapValue(&(m), (k)))
+#define LookupBuffer(m, k) ((ALbuffer*)LookupUIntMapKey(&(m), (k)))
+#define LookupFilter(m, k) ((ALfilter*)LookupUIntMapKey(&(m), (k)))
+#define LookupEffectSlot(m, k) ((ALeffectslot*)LookupUIntMapKey(&(m), (k)))
 
 AL_API ALvoid AL_APIENTRY alGenSources(ALsizei n,ALuint *sources)
 {
@@ -119,7 +124,7 @@ AL_API ALvoid AL_APIENTRY alDeleteSources(ALsizei n, const ALuint *sources)
         // Check that all Sources are valid (and can therefore be deleted)
         for(i = 0;i < n;i++)
         {
-            if(LookupSource(Context, sources[i]) == NULL)
+            if(LookupSource(Context->SourceMap, sources[i]) == NULL)
             {
                 alSetError(Context, AL_INVALID_NAME);
                 n = 0;
@@ -133,7 +138,7 @@ AL_API ALvoid AL_APIENTRY alDeleteSources(ALsizei n, const ALuint *sources)
             ALsource **srclist, **srclistend;
 
             // Remove Source from list of Sources
-            if((Source=RemoveSource(Context, sources[i])) == NULL)
+            if((Source=RemoveSource(Context->SourceMap, sources[i])) == NULL)
                 continue;
 
             FreeThunkEntry(Source->source);
@@ -188,7 +193,7 @@ AL_API ALboolean AL_APIENTRY alIsSource(ALuint source)
     Context = GetContextRef();
     if(!Context) return AL_FALSE;
 
-    result = (LookupSource(Context, source) ? AL_TRUE : AL_FALSE);
+    result = (LookupSource(Context->SourceMap, source) ? AL_TRUE : AL_FALSE);
 
     ALCcontext_DecRef(Context);
 
@@ -204,7 +209,7 @@ AL_API ALvoid AL_APIENTRY alSourcef(ALuint source, ALenum eParam, ALfloat flValu
     pContext = GetContextRef();
     if(!pContext) return;
 
-    if((Source=LookupSource(pContext, source)) != NULL)
+    if((Source=LookupSource(pContext->SourceMap, source)) != NULL)
     {
         switch(eParam)
         {
@@ -397,7 +402,7 @@ AL_API ALvoid AL_APIENTRY alSource3f(ALuint source, ALenum eParam, ALfloat flVal
     pContext = GetContextRef();
     if(!pContext) return;
 
-    if((Source=LookupSource(pContext, source)) != NULL)
+    if((Source=LookupSource(pContext->SourceMap, source)) != NULL)
     {
         switch(eParam)
         {
@@ -495,7 +500,7 @@ AL_API ALvoid AL_APIENTRY alSourcefv(ALuint source, ALenum eParam, const ALfloat
 
     if(pflValues)
     {
-        if(LookupSource(pContext, source) != NULL)
+        if(LookupSource(pContext->SourceMap, source) != NULL)
         {
             switch(eParam)
             {
@@ -534,7 +539,7 @@ AL_API ALvoid AL_APIENTRY alSourcei(ALuint source,ALenum eParam,ALint lValue)
     pContext = GetContextRef();
     if(!pContext) return;
 
-    if((Source=LookupSource(pContext, source)) != NULL)
+    if((Source=LookupSource(pContext->SourceMap, source)) != NULL)
     {
         ALCdevice *device = pContext->Device;
 
@@ -564,7 +569,8 @@ AL_API ALvoid AL_APIENTRY alSourcei(ALuint source,ALenum eParam,ALint lValue)
                     ALbufferlistitem *oldlist;
                     ALbuffer *buffer = NULL;
 
-                    if(lValue == 0 || (buffer=LookupBuffer(device, lValue)) != NULL)
+                    if(lValue == 0 ||
+                       (buffer=LookupBuffer(device->BufferMap, lValue)) != NULL)
                     {
                         Source->BuffersInQueue = 0;
                         Source->BuffersPlayed = 0;
@@ -583,7 +589,7 @@ AL_API ALvoid AL_APIENTRY alSourcei(ALuint source,ALenum eParam,ALint lValue)
                             // Increment reference counter for buffer
                             IncrementRef(&buffer->ref);
 
-                            oldlist = ExchangePtr((XchgPtr*)&Source->queue, BufferListItem);
+                            oldlist = ExchangePtr((void**)&Source->queue, BufferListItem);
                             Source->BuffersInQueue = 1;
 
                             ReadLock(&buffer->lock);
@@ -600,7 +606,7 @@ AL_API ALvoid AL_APIENTRY alSourcei(ALuint source,ALenum eParam,ALint lValue)
                         {
                             // Source is now in UNDETERMINED mode
                             Source->lSourceType = AL_UNDETERMINED;
-                            oldlist = ExchangePtr((XchgPtr*)&Source->queue, NULL);
+                            oldlist = ExchangePtr((void**)&Source->queue, NULL);
                         }
 
                         // Delete all previous elements in the queue
@@ -656,7 +662,8 @@ AL_API ALvoid AL_APIENTRY alSourcei(ALuint source,ALenum eParam,ALint lValue)
             case AL_DIRECT_FILTER: {
                 ALfilter *filter = NULL;
 
-                if(lValue == 0 || (filter=LookupFilter(pContext->Device, lValue)) != NULL)
+                if(lValue == 0 ||
+                   (filter=LookupFilter(pContext->Device->FilterMap, lValue)) != NULL)
                 {
                     LockContext(pContext);
                     if(!filter)
@@ -762,7 +769,7 @@ AL_API void AL_APIENTRY alSource3i(ALuint source, ALenum eParam, ALint lValue1, 
     pContext = GetContextRef();
     if(!pContext) return;
 
-    if((Source=LookupSource(pContext, source)) != NULL)
+    if((Source=LookupSource(pContext->SourceMap, source)) != NULL)
     {
         ALCdevice *device = pContext->Device;
 
@@ -774,13 +781,15 @@ AL_API void AL_APIENTRY alSource3i(ALuint source, ALenum eParam, ALint lValue1, 
 
                 LockContext(pContext);
                 if((ALuint)lValue2 < device->NumAuxSends &&
-                   (lValue1 == 0 || (ALEffectSlot=LookupEffectSlot(pContext, lValue1)) != NULL) &&
-                   (lValue3 == 0 || (ALFilter=LookupFilter(device, lValue3)) != NULL))
+                   (lValue1 == 0 ||
+                    (ALEffectSlot=LookupEffectSlot(pContext->EffectSlotMap, lValue1)) != NULL) &&
+                   (lValue3 == 0 ||
+                    (ALFilter=LookupFilter(device->FilterMap, lValue3)) != NULL))
                 {
                     /* Release refcount on the previous slot, and add one for
                      * the new slot */
                     if(ALEffectSlot) IncrementRef(&ALEffectSlot->ref);
-                    ALEffectSlot = ExchangePtr((XchgPtr*)&Source->Send[lValue2].Slot, ALEffectSlot);
+                    ALEffectSlot = ExchangePtr((void**)&Source->Send[lValue2].Slot, ALEffectSlot);
                     if(ALEffectSlot) DecrementRef(&ALEffectSlot->ref);
 
                     if(!ALFilter)
@@ -856,7 +865,7 @@ AL_API void AL_APIENTRY alSourceiv(ALuint source, ALenum eParam, const ALint* pl
 
     if(plValues)
     {
-        if(LookupSource(pContext, source) != NULL)
+        if(LookupSource(pContext->SourceMap, source) != NULL)
         {
             switch(eParam)
             {
@@ -887,7 +896,7 @@ AL_API ALvoid AL_APIENTRY alGetSourcef(ALuint source, ALenum eParam, ALfloat *pf
 
     if(pflValue)
     {
-        if((Source=LookupSource(pContext, source)) != NULL)
+        if((Source=LookupSource(pContext->SourceMap, source)) != NULL)
         {
             switch(eParam)
             {
@@ -931,7 +940,7 @@ AL_API ALvoid AL_APIENTRY alGetSourcef(ALuint source, ALenum eParam, ALfloat *pf
                                 pContext->Device->Frequency;
                     GetSourceOffset(Source, eParam, Offsets, updateLen);
                     UnlockContext(pContext);
-                    *pflValue = (ALfloat)Offsets[0];
+                    *pflValue = Offsets[0];
                     break;
 
                 case AL_CONE_INNER_ANGLE:
@@ -983,7 +992,7 @@ AL_API ALvoid AL_APIENTRY alGetSource3f(ALuint source, ALenum eParam, ALfloat* p
 
     if(pflValue1 && pflValue2 && pflValue3)
     {
-        if((Source=LookupSource(pContext, source)) != NULL)
+        if((Source=LookupSource(pContext->SourceMap, source)) != NULL)
         {
             switch(eParam)
             {
@@ -1067,7 +1076,7 @@ AL_API ALvoid AL_APIENTRY alGetSourcefv(ALuint source, ALenum eParam, ALfloat *p
 
     if(pflValues)
     {
-        if((Source=LookupSource(pContext, source)) != NULL)
+        if((Source=LookupSource(pContext->SourceMap, source)) != NULL)
         {
             switch(eParam)
             {
@@ -1078,8 +1087,8 @@ AL_API ALvoid AL_APIENTRY alGetSourcefv(ALuint source, ALenum eParam, ALfloat *p
                                 pContext->Device->Frequency;
                     GetSourceOffset(Source, eParam, Offsets, updateLen);
                     UnlockContext(pContext);
-                    pflValues[0] = (ALfloat)Offsets[0];
-                    pflValues[1] = (ALfloat)Offsets[1];
+                    pflValues[0] = Offsets[0];
+                    pflValues[1] = Offsets[1];
                     break;
 
                 default:
@@ -1110,7 +1119,7 @@ AL_API ALvoid AL_APIENTRY alGetSourcei(ALuint source, ALenum eParam, ALint *plVa
 
     if(plValue)
     {
-        if((Source=LookupSource(pContext, source)) != NULL)
+        if((Source=LookupSource(pContext->SourceMap, source)) != NULL)
         {
             switch(eParam)
             {
@@ -1244,7 +1253,7 @@ AL_API void AL_APIENTRY alGetSource3i(ALuint source, ALenum eParam, ALint* plVal
 
     if(plValue1 && plValue2 && plValue3)
     {
-        if((Source=LookupSource(pContext, source)) != NULL)
+        if((Source=LookupSource(pContext->SourceMap, source)) != NULL)
         {
             switch(eParam)
             {
@@ -1333,7 +1342,7 @@ AL_API void AL_APIENTRY alGetSourceiv(ALuint source, ALenum eParam, ALint* plVal
 
     if(plValues)
     {
-        if((Source=LookupSource(pContext, source)) != NULL)
+        if((Source=LookupSource(pContext->SourceMap, source)) != NULL)
         {
             switch(eParam)
             {
@@ -1391,7 +1400,7 @@ AL_API ALvoid AL_APIENTRY alSourcePlayv(ALsizei n, const ALuint *sources)
     // Check that all the Sources are valid
     for(i = 0;i < n;i++)
     {
-        if(!LookupSource(Context, sources[i]))
+        if(!LookupSource(Context->SourceMap, sources[i]))
         {
             alSetError(Context, AL_INVALID_NAME);
             goto done;
@@ -1421,7 +1430,7 @@ AL_API ALvoid AL_APIENTRY alSourcePlayv(ALsizei n, const ALuint *sources)
 
     for(i = 0;i < n;i++)
     {
-        Source = LookupSource(Context, sources[i]);
+        Source = LookupSource(Context->SourceMap, sources[i]);
         if(Context->DeferUpdates) Source->new_state = AL_PLAYING;
         else SetSourceState(Source, Context, AL_PLAYING);
     }
@@ -1459,7 +1468,7 @@ AL_API ALvoid AL_APIENTRY alSourcePausev(ALsizei n, const ALuint *sources)
     // Check all the Sources are valid
     for(i = 0;i < n;i++)
     {
-        if(!LookupSource(Context, sources[i]))
+        if(!LookupSource(Context->SourceMap, sources[i]))
         {
             alSetError(Context, AL_INVALID_NAME);
             goto done;
@@ -1469,7 +1478,7 @@ AL_API ALvoid AL_APIENTRY alSourcePausev(ALsizei n, const ALuint *sources)
     LockContext(Context);
     for(i = 0;i < n;i++)
     {
-        Source = LookupSource(Context, sources[i]);
+        Source = LookupSource(Context->SourceMap, sources[i]);
         if(Context->DeferUpdates) Source->new_state = AL_PAUSED;
         else SetSourceState(Source, Context, AL_PAUSED);
     }
@@ -1507,7 +1516,7 @@ AL_API ALvoid AL_APIENTRY alSourceStopv(ALsizei n, const ALuint *sources)
     // Check all the Sources are valid
     for(i = 0;i < n;i++)
     {
-        if(!LookupSource(Context, sources[i]))
+        if(!LookupSource(Context->SourceMap, sources[i]))
         {
             alSetError(Context, AL_INVALID_NAME);
             goto done;
@@ -1517,7 +1526,7 @@ AL_API ALvoid AL_APIENTRY alSourceStopv(ALsizei n, const ALuint *sources)
     LockContext(Context);
     for(i = 0;i < n;i++)
     {
-        Source = LookupSource(Context, sources[i]);
+        Source = LookupSource(Context->SourceMap, sources[i]);
         Source->new_state = AL_NONE;
         SetSourceState(Source, Context, AL_STOPPED);
     }
@@ -1555,7 +1564,7 @@ AL_API ALvoid AL_APIENTRY alSourceRewindv(ALsizei n, const ALuint *sources)
     // Check all the Sources are valid
     for(i = 0;i < n;i++)
     {
-        if(!LookupSource(Context, sources[i]))
+        if(!LookupSource(Context->SourceMap, sources[i]))
         {
             alSetError(Context, AL_INVALID_NAME);
             goto done;
@@ -1565,7 +1574,7 @@ AL_API ALvoid AL_APIENTRY alSourceRewindv(ALsizei n, const ALuint *sources)
     LockContext(Context);
     for(i = 0;i < n;i++)
     {
-        Source = LookupSource(Context, sources[i]);
+        Source = LookupSource(Context->SourceMap, sources[i]);
         Source->new_state = AL_NONE;
         SetSourceState(Source, Context, AL_INITIAL);
     }
@@ -1601,7 +1610,7 @@ AL_API ALvoid AL_APIENTRY alSourceQueueBuffers(ALuint source, ALsizei n, const A
     // Check that all buffers are valid or zero and that the source is valid
 
     // Check that this is a valid source
-    if((Source=LookupSource(Context, source)) == NULL)
+    if((Source=LookupSource(Context->SourceMap, source)) == NULL)
     {
         alSetError(Context, AL_INVALID_NAME);
         goto error;
@@ -1636,7 +1645,7 @@ AL_API ALvoid AL_APIENTRY alSourceQueueBuffers(ALuint source, ALsizei n, const A
     for(i = 0;i < n;i++)
     {
         ALbuffer *buffer = NULL;
-        if(buffers[i] && (buffer=LookupBuffer(device, buffers[i])) == NULL)
+        if(buffers[i] && (buffer=LookupBuffer(device->BufferMap, buffers[i])) == NULL)
         {
             UnlockContext(Context);
             alSetError(Context, AL_INVALID_NAME);
@@ -1747,7 +1756,7 @@ AL_API ALvoid AL_APIENTRY alSourceUnqueueBuffers( ALuint source, ALsizei n, ALui
         goto done;
     }
 
-    if((Source=LookupSource(Context, source)) == NULL)
+    if((Source=LookupSource(Context->SourceMap, source)) == NULL)
     {
         alSetError(Context, AL_INVALID_NAME);
         goto done;
@@ -1866,9 +1875,17 @@ ALvoid SetSourceState(ALsource *Source, ALCcontext *Context, ALenum state)
         BufferList = Source->queue;
         while(BufferList)
         {
-            if(BufferList->buffer != NULL && BufferList->buffer->SampleLen)
+            if(BufferList->buffer != NULL && BufferList->buffer->size)
                 break;
             BufferList = BufferList->next;
+        }
+
+        /* If there's nothing to play, or device is disconnected, go right to
+         * stopped */
+        if(!BufferList || !Context->Device->Connected)
+        {
+            SetSourceState(Source, Context, AL_STOPPED);
+            return;
         }
 
         if(Source->state != AL_PLAYING)
@@ -1898,14 +1915,6 @@ ALvoid SetSourceState(ALsource *Source, ALCcontext *Context, ALenum state)
         // Check if an Offset has been set
         if(Source->lOffset != -1)
             ApplyOffset(Source);
-
-        /* If there's nothing to play, or device is disconnected, go right to
-         * stopped */
-        if(!BufferList || !Context->Device->Connected)
-        {
-            SetSourceState(Source, Context, AL_STOPPED);
-            return;
-        }
 
         for(j = 0;j < Context->ActiveSourceCount;j++)
         {
@@ -1960,9 +1969,11 @@ static ALvoid GetSourceOffset(ALsource *Source, ALenum name, ALdouble *offset, A
 {
     const ALbufferlistitem *BufferList;
     const ALbuffer         *Buffer = NULL;
-    ALuint  BufferFreq = 0;
+    enum UserFmtType OriginalType;
+    ALsizei BufferFreq;
+    ALint   Channels, Bytes;
     ALuint  readPos, writePos;
-    ALuint  totalBufferLen;
+    ALuint  TotalBufferDataSize;
     ALuint  i;
 
     // Find the first non-NULL Buffer in the Queue
@@ -1972,7 +1983,6 @@ static ALvoid GetSourceOffset(ALsource *Source, ALenum name, ALdouble *offset, A
         if(BufferList->buffer)
         {
             Buffer = BufferList->buffer;
-            BufferFreq = Buffer->Frequency;
             break;
         }
         BufferList = BufferList->next;
@@ -1985,58 +1995,64 @@ static ALvoid GetSourceOffset(ALsource *Source, ALenum name, ALdouble *offset, A
         return;
     }
 
-    // Get Current SamplesPlayed (NOTE : This is the offset into the *current* buffer)
-    readPos = Source->position;
-    // Add length of any processed buffers in the queue
-    totalBufferLen = 0;
+    // Get Current Buffer Size and frequency (in milliseconds)
+    BufferFreq = Buffer->Frequency;
+    OriginalType = Buffer->OriginalType;
+    Channels = ChannelsFromFmt(Buffer->FmtChannels);
+    Bytes = BytesFromFmt(Buffer->FmtType);
+
+    // Get Current BytesPlayed (NOTE : This is the byte offset into the *current* buffer)
+    readPos = Source->position * Channels * Bytes;
+    // Add byte length of any processed buffers in the queue
+    TotalBufferDataSize = 0;
     BufferList = Source->queue;
     for(i = 0;BufferList;i++)
     {
         if(BufferList->buffer)
         {
             if(i < Source->BuffersPlayed)
-                readPos += BufferList->buffer->SampleLen;
-            totalBufferLen += BufferList->buffer->SampleLen;
+                readPos += BufferList->buffer->size;
+            TotalBufferDataSize += BufferList->buffer->size;
         }
         BufferList = BufferList->next;
     }
     if(Source->state == AL_PLAYING)
-        writePos = readPos + (ALuint)(updateLen*BufferFreq);
+        writePos = readPos + ((ALuint)(updateLen*BufferFreq) * Channels * Bytes);
     else
         writePos = readPos;
 
     if(Source->bLooping)
     {
-        readPos %= totalBufferLen;
-        writePos %= totalBufferLen;
+        readPos %= TotalBufferDataSize;
+        writePos %= TotalBufferDataSize;
     }
     else
     {
         // Wrap positions back to 0
-        if(readPos >= totalBufferLen)
+        if(readPos >= TotalBufferDataSize)
             readPos = 0;
-        if(writePos >= totalBufferLen)
+        if(writePos >= TotalBufferDataSize)
             writePos = 0;
     }
 
     switch(name)
     {
         case AL_SEC_OFFSET:
-            offset[0] = (ALdouble)readPos / Buffer->Frequency;
-            offset[1] = (ALdouble)writePos / Buffer->Frequency;
+            offset[0] = (ALdouble)readPos / (Channels * Bytes * BufferFreq);
+            offset[1] = (ALdouble)writePos / (Channels * Bytes * BufferFreq);
             break;
         case AL_SAMPLE_OFFSET:
         case AL_SAMPLE_RW_OFFSETS_SOFT:
-            offset[0] = (ALdouble)readPos;
-            offset[1] = (ALdouble)writePos;
+            offset[0] = (ALdouble)(readPos / (Channels * Bytes));
+            offset[1] = (ALdouble)(writePos / (Channels * Bytes));
             break;
         case AL_BYTE_OFFSET:
         case AL_BYTE_RW_OFFSETS_SOFT:
             // Take into account the original format of the Buffer
-            if(Buffer->OriginalType == UserFmtIMA4)
+            if(OriginalType == UserFmtIMA4)
             {
-                ALuint BlockSize = 36 * ChannelsFromFmt(Buffer->FmtChannels);
-                ALuint FrameBlockSize = 65;
+                ALuint FrameBlockSize = 65 * Bytes * Channels;
+                ALuint BlockSize = 36 * Channels;
 
                 // Round down to nearest ADPCM block
                 offset[0] = (ALdouble)(readPos / FrameBlockSize * BlockSize);
@@ -2051,9 +2067,9 @@ static ALvoid GetSourceOffset(ALsource *Source, ALenum name, ALdouble *offset, A
             }
             else
             {
-                ALuint FrameSize = FrameSizeFromUserFmt(Buffer->OriginalChannels, Buffer->OriginalType);
-                offset[0] = (ALdouble)(readPos * FrameSize);
-                offset[1] = (ALdouble)(writePos * FrameSize);
+                ALuint OrigBytes = BytesFromUserFmt(OriginalType);
+                offset[0] = (ALdouble)(readPos / Bytes * OrigBytes);
+                offset[1] = (ALdouble)(writePos / Bytes * OrigBytes);
             }
             break;
     }
@@ -2070,44 +2086,45 @@ ALboolean ApplyOffset(ALsource *Source)
 {
     const ALbufferlistitem *BufferList;
     const ALbuffer         *Buffer;
-    ALint bufferLen, totalBufferLen;
-    ALint buffersPlayed;
-    ALint offset;
+    ALint lBufferSize, lTotalBufferSize;
+    ALint BuffersPlayed;
+    ALint lByteOffset;
 
     // Get true byte offset
-    offset = GetSampleOffset(Source);
+    lByteOffset = GetByteOffset(Source);
 
     // If the offset is invalid, don't apply it
-    if(offset == -1)
+    if(lByteOffset == -1)
         return AL_FALSE;
 
     // Sort out the queue (pending and processed states)
     BufferList = Source->queue;
-    totalBufferLen = 0;
-    buffersPlayed = 0;
+    lTotalBufferSize = 0;
+    BuffersPlayed = 0;
 
     while(BufferList)
     {
         Buffer = BufferList->buffer;
-        bufferLen = Buffer ? Buffer->SampleLen : 0;
+        lBufferSize = Buffer ? Buffer->size : 0;
 
-        if(bufferLen <= offset-totalBufferLen)
+        if(lBufferSize <= lByteOffset-lTotalBufferSize)
         {
             // Offset is past this buffer so increment BuffersPlayed
-            buffersPlayed++;
+            BuffersPlayed++;
         }
-        else if(totalBufferLen <= offset)
+        else if(lTotalBufferSize <= lByteOffset)
         {
             // Offset is within this buffer
-            Source->BuffersPlayed = buffersPlayed;
+            Source->BuffersPlayed = BuffersPlayed;
 
             // SW Mixer Positions are in Samples
-            Source->position = offset - totalBufferLen;
+            Source->position = (lByteOffset - lTotalBufferSize) /
+                                FrameSizeFromFmt(Buffer->FmtChannels, Buffer->FmtType);
             return AL_TRUE;
         }
 
         // Increment the TotalBufferSize
-        totalBufferLen += bufferLen;
+        lTotalBufferSize += lBufferSize;
 
         // Move on to next buffer in the Queue
         BufferList = BufferList->next;
@@ -2118,17 +2135,17 @@ ALboolean ApplyOffset(ALsource *Source)
 
 
 /*
-    GetSampleOffset
+    GetByteOffset
 
-    Returns the sample offset into the Source's queue (from the Sample, Byte or Millisecond offset
-    supplied by the application). This takes into account the fact that the buffer format may have
-    been modifed by AL
+    Returns the 'true' byte offset into the Source's queue (from the Sample, Byte or Millisecond
+    offset supplied by the application).   This takes into account the fact that the buffer format
+    may have been modifed by AL (e.g 8bit samples are converted to float)
 */
-static ALint GetSampleOffset(ALsource *Source)
+static ALint GetByteOffset(ALsource *Source)
 {
     const ALbuffer *Buffer = NULL;
     const ALbufferlistitem *BufferList;
-    ALint Offset = -1;
+    ALint ByteOffset = -1;
 
     // Find the first non-NULL Buffer in the Queue
     BufferList = Source->queue;
@@ -2153,31 +2170,33 @@ static ALint GetSampleOffset(ALsource *Source)
     {
     case AL_BYTE_OFFSET:
         // Take into consideration the original format
-        Offset = Source->lOffset;
+        ByteOffset = Source->lOffset;
         if(Buffer->OriginalType == UserFmtIMA4)
         {
             // Round down to nearest ADPCM block
-            Offset /= 36 * ChannelsFromUserFmt(Buffer->OriginalChannels);
+            ByteOffset /= 36 * ChannelsFromUserFmt(Buffer->OriginalChannels);
             // Multiply by compression rate (65 sample frames per block)
-            Offset *= 65;
+            ByteOffset *= 65;
         }
         else
-            Offset /= FrameSizeFromUserFmt(Buffer->OriginalChannels, Buffer->OriginalType);
+            ByteOffset /= FrameSizeFromUserFmt(Buffer->OriginalChannels, Buffer->OriginalType);
+        ByteOffset *= FrameSizeFromFmt(Buffer->FmtChannels, Buffer->FmtType);
         break;
 
     case AL_SAMPLE_OFFSET:
-        Offset = Source->lOffset;
+        ByteOffset = Source->lOffset * FrameSizeFromFmt(Buffer->FmtChannels, Buffer->FmtType);
         break;
 
     case AL_SEC_OFFSET:
         // Note - lOffset is internally stored as Milliseconds
-        Offset = (ALint)(Source->lOffset / 1000.0 * Buffer->Frequency);
+        ByteOffset  = (ALint)(Source->lOffset / 1000.0 * Buffer->Frequency);
+        ByteOffset *= FrameSizeFromFmt(Buffer->FmtChannels, Buffer->FmtType);
         break;
     }
     // Clear Offset
     Source->lOffset = -1;
 
-    return Offset;
+    return ByteOffset;
 }
 
 

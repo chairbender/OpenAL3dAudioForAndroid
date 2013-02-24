@@ -37,13 +37,29 @@
 #include "bs2b.h"
 
 
-static __inline ALfloat point32(const ALfloat *vals, ALint step, ALint frac)
+static __inline ALdouble point32(const ALfloat *vals, ALint step, ALint frac)
 { return vals[0]; (void)step; (void)frac; }
-static __inline ALfloat lerp32(const ALfloat *vals, ALint step, ALint frac)
-{ return lerp(vals[0], vals[step], frac * (1.0f/FRACTIONONE)); }
-static __inline ALfloat cubic32(const ALfloat *vals, ALint step, ALint frac)
+static __inline ALdouble lerp32(const ALfloat *vals, ALint step, ALint frac)
+{ return lerp(vals[0], vals[step], frac * (1.0/FRACTIONONE)); }
+static __inline ALdouble cubic32(const ALfloat *vals, ALint step, ALint frac)
 { return cubic(vals[-step], vals[0], vals[step], vals[step+step],
-               frac * (1.0f/FRACTIONONE)); }
+               frac * (1.0/FRACTIONONE)); }
+
+static __inline ALdouble point16(const ALshort *vals, ALint step, ALint frac)
+{ return vals[0] * (1.0/32767.0); (void)step; (void)frac; }
+static __inline ALdouble lerp16(const ALshort *vals, ALint step, ALint frac)
+{ return lerp(vals[0], vals[step], frac * (1.0/FRACTIONONE)) * (1.0/32767.0); }
+static __inline ALdouble cubic16(const ALshort *vals, ALint step, ALint frac)
+{ return cubic(vals[-step], vals[0], vals[step], vals[step+step],
+               frac * (1.0/FRACTIONONE)) * (1.0/32767.0); }
+
+static __inline ALdouble point8(const ALbyte *vals, ALint step, ALint frac)
+{ return vals[0] * (1.0/127.0); (void)step; (void)frac; }
+static __inline ALdouble lerp8(const ALbyte *vals, ALint step, ALint frac)
+{ return lerp(vals[0], vals[step], frac * (1.0/FRACTIONONE)) * (1.0/127.0); }
+static __inline ALdouble cubic8(const ALbyte *vals, ALint step, ALint frac)
+{ return cubic(vals[-step], vals[0], vals[step], vals[step+step],
+               frac * (1.0/FRACTIONONE)) * (1.0/127.0); }
 
 #ifdef __GNUC__
 #define LIKELY(x) __builtin_expect(!!(x), 1)
@@ -251,7 +267,7 @@ static void Mix_Hrtf_##T##_##sampler(ALsource *Source, ALCdevice *Device,     \
         ALfloat *RESTRICT WetPendingClicks;                                   \
         FILTER  *WetFilter;                                                   \
                                                                               \
-        if(Slot == NULL)                                                      \
+        if(!Slot || Slot->effect.type == AL_EFFECT_NULL)                      \
             continue;                                                         \
                                                                               \
         WetBuffer = Slot->WetBuffer;                                          \
@@ -302,6 +318,14 @@ DECL_TEMPLATE(ALfloat, point32)
 DECL_TEMPLATE(ALfloat, lerp32)
 DECL_TEMPLATE(ALfloat, cubic32)
 
+DECL_TEMPLATE(ALshort, point16)
+DECL_TEMPLATE(ALshort, lerp16)
+DECL_TEMPLATE(ALshort, cubic16)
+
+DECL_TEMPLATE(ALbyte, point8)
+DECL_TEMPLATE(ALbyte, lerp8)
+DECL_TEMPLATE(ALbyte, cubic8)
+
 #undef DECL_TEMPLATE
 
 
@@ -312,11 +336,11 @@ static void Mix_##T##_##sampler(ALsource *Source, ALCdevice *Device,          \
 {                                                                             \
     const ALuint NumChannels = Source->NumChannels;                           \
     const T *RESTRICT data = srcdata;                                         \
-    ALfloat (*RESTRICT DryBuffer)[MAXCHANNELS];                               \
-    ALfloat *RESTRICT ClickRemoval, *RESTRICT PendingClicks;                  \
-    ALfloat DrySend[MAXCHANNELS];                                             \
-    FILTER *DryFilter;                                                        \
+    ALfloat (*DryBuffer)[MAXCHANNELS];                                        \
+    ALfloat *ClickRemoval, *PendingClicks;                                    \
     ALuint pos, frac;                                                         \
+    ALfloat DrySend[MAXCHANNELS][MAXCHANNELS];                                \
+    FILTER *DryFilter;                                                        \
     ALuint BufferIdx;                                                         \
     ALuint increment;                                                         \
     ALuint i, out, c;                                                         \
@@ -328,15 +352,17 @@ static void Mix_##T##_##sampler(ALsource *Source, ALCdevice *Device,          \
     ClickRemoval = Device->ClickRemoval;                                      \
     PendingClicks = Device->PendingClicks;                                    \
     DryFilter = &Source->Params.iirFilter;                                    \
+    for(i = 0;i < NumChannels;i++)                                            \
+    {                                                                         \
+        for(c = 0;c < MAXCHANNELS;c++)                                        \
+            DrySend[i][c] = Source->Params.DryGains[i][c];                    \
+    }                                                                         \
                                                                               \
     pos = 0;                                                                  \
     frac = *DataPosFrac;                                                      \
                                                                               \
     for(i = 0;i < NumChannels;i++)                                            \
     {                                                                         \
-        for(c = 0;c < MAXCHANNELS;c++)                                        \
-            DrySend[c] = Source->Params.DryGains[i][c];                       \
-                                                                              \
         pos = 0;                                                              \
         frac = *DataPosFrac;                                                  \
                                                                               \
@@ -346,7 +372,7 @@ static void Mix_##T##_##sampler(ALsource *Source, ALCdevice *Device,          \
                                                                               \
             value = lpFilter2PC(DryFilter, i, value);                         \
             for(c = 0;c < MAXCHANNELS;c++)                                    \
-                ClickRemoval[c] -= value*DrySend[c];                          \
+                ClickRemoval[c] -= value*DrySend[i][c];                       \
         }                                                                     \
         for(BufferIdx = 0;BufferIdx < BufferSize;BufferIdx++)                 \
         {                                                                     \
@@ -354,7 +380,7 @@ static void Mix_##T##_##sampler(ALsource *Source, ALCdevice *Device,          \
                                                                               \
             value = lpFilter2P(DryFilter, i, value);                          \
             for(c = 0;c < MAXCHANNELS;c++)                                    \
-                DryBuffer[OutPos][c] += value*DrySend[c];                     \
+                DryBuffer[OutPos][c] += value*DrySend[i][c];                  \
                                                                               \
             frac += increment;                                                \
             pos  += frac>>FRACTIONBITS;                                       \
@@ -367,7 +393,7 @@ static void Mix_##T##_##sampler(ALsource *Source, ALCdevice *Device,          \
                                                                               \
             value = lpFilter2PC(DryFilter, i, value);                         \
             for(c = 0;c < MAXCHANNELS;c++)                                    \
-                PendingClicks[c] += value*DrySend[c];                         \
+                PendingClicks[c] += value*DrySend[i][c];                      \
         }                                                                     \
         OutPos -= BufferSize;                                                 \
     }                                                                         \
@@ -381,7 +407,7 @@ static void Mix_##T##_##sampler(ALsource *Source, ALCdevice *Device,          \
         ALfloat *WetPendingClicks;                                            \
         FILTER  *WetFilter;                                                   \
                                                                               \
-        if(Slot == NULL)                                                      \
+        if(!Slot || Slot->effect.type == AL_EFFECT_NULL)                      \
             continue;                                                         \
                                                                               \
         WetBuffer = Slot->WetBuffer;                                          \
@@ -432,88 +458,91 @@ DECL_TEMPLATE(ALfloat, point32)
 DECL_TEMPLATE(ALfloat, lerp32)
 DECL_TEMPLATE(ALfloat, cubic32)
 
+DECL_TEMPLATE(ALshort, point16)
+DECL_TEMPLATE(ALshort, lerp16)
+DECL_TEMPLATE(ALshort, cubic16)
+
+DECL_TEMPLATE(ALbyte, point8)
+DECL_TEMPLATE(ALbyte, lerp8)
+DECL_TEMPLATE(ALbyte, cubic8)
+
 #undef DECL_TEMPLATE
 
 
-MixerFunc SelectMixer(enum Resampler Resampler)
-{
-    switch(Resampler)
-    {
-        case POINT_RESAMPLER:
-            return Mix_ALfloat_point32;
-        case LINEAR_RESAMPLER:
-            return Mix_ALfloat_lerp32;
-        case CUBIC_RESAMPLER:
-            return Mix_ALfloat_cubic32;
-        case RESAMPLER_MIN:
-        case RESAMPLER_MAX:
-            break;
-    }
-    return NULL;
-}
-
-MixerFunc SelectHrtfMixer(enum Resampler Resampler)
-{
-    switch(Resampler)
-    {
-        case POINT_RESAMPLER:
-            return Mix_Hrtf_ALfloat_point32;
-        case LINEAR_RESAMPLER:
-            return Mix_Hrtf_ALfloat_lerp32;
-        case CUBIC_RESAMPLER:
-            return Mix_Hrtf_ALfloat_cubic32;
-        case RESAMPLER_MIN:
-        case RESAMPLER_MAX:
-            break;
-    }
-    return NULL;
-}
-
-
-static __inline ALfloat Sample_ALbyte(ALbyte val)
-{ return val * (1.0f/127.0f); }
-
-static __inline ALfloat Sample_ALshort(ALshort val)
-{ return val * (1.0f/32767.0f); }
-
-static __inline ALfloat Sample_ALfloat(ALfloat val)
-{ return val; }
-
-#define DECL_TEMPLATE(T)                                                      \
-static void Load_##T(ALfloat *dst, const T *src, ALuint samples)              \
+#define DECL_TEMPLATE(sampler)                                                \
+static MixerFunc Select_##sampler(enum FmtType FmtType)                       \
 {                                                                             \
-    ALuint i;                                                                 \
-    for(i = 0;i < samples;i++)                                                \
-        dst[i] = Sample_##T(src[i]);                                          \
+    switch(FmtType)                                                           \
+    {                                                                         \
+    case FmtByte:                                                             \
+        return Mix_ALbyte_##sampler##8;                                       \
+    case FmtShort:                                                            \
+        return Mix_ALshort_##sampler##16;                                     \
+    case FmtFloat:                                                            \
+        return Mix_ALfloat_##sampler##32;                                     \
+    }                                                                         \
+    return NULL;                                                              \
 }
 
-DECL_TEMPLATE(ALbyte)
-DECL_TEMPLATE(ALshort)
-DECL_TEMPLATE(ALfloat)
+DECL_TEMPLATE(point)
+DECL_TEMPLATE(lerp)
+DECL_TEMPLATE(cubic)
 
 #undef DECL_TEMPLATE
 
-static void LoadStack(ALfloat *dst, const ALvoid *src, enum FmtType srctype, ALuint samples)
+MixerFunc SelectMixer(ALbuffer *Buffer, enum Resampler Resampler)
 {
-    switch(srctype)
+    switch(Resampler)
     {
-        case FmtByte:
-            Load_ALbyte(dst, src, samples);
-            break;
-        case FmtShort:
-            Load_ALshort(dst, src, samples);
-            break;
-        case FmtFloat:
-            Load_ALfloat(dst, src, samples);
+        case POINT_RESAMPLER:
+            return Select_point(Buffer->FmtType);
+        case LINEAR_RESAMPLER:
+            return Select_lerp(Buffer->FmtType);
+        case CUBIC_RESAMPLER:
+            return Select_cubic(Buffer->FmtType);
+        case RESAMPLER_MIN:
+        case RESAMPLER_MAX:
             break;
     }
+    return NULL;
 }
 
-static void SilenceStack(ALfloat *dst, ALuint samples)
+#define DECL_TEMPLATE(sampler)                                                \
+static MixerFunc Select_Hrtf_##sampler(enum FmtType FmtType)                  \
+{                                                                             \
+    switch(FmtType)                                                           \
+    {                                                                         \
+    case FmtByte:                                                             \
+        return Mix_Hrtf_ALbyte_##sampler##8;                                  \
+    case FmtShort:                                                            \
+        return Mix_Hrtf_ALshort_##sampler##16;                                \
+    case FmtFloat:                                                            \
+        return Mix_Hrtf_ALfloat_##sampler##32;                                \
+    }                                                                         \
+    return NULL;                                                              \
+}
+
+DECL_TEMPLATE(point)
+DECL_TEMPLATE(lerp)
+DECL_TEMPLATE(cubic)
+
+#undef DECL_TEMPLATE
+
+MixerFunc SelectHrtfMixer(ALbuffer *Buffer, enum Resampler Resampler)
 {
-    ALuint i;
-    for(i = 0;i < samples;i++)
-        dst[i] = 0.0f;
+    switch(Resampler)
+    {
+        case POINT_RESAMPLER:
+            return Select_Hrtf_point(Buffer->FmtType);
+        case LINEAR_RESAMPLER:
+            return Select_Hrtf_lerp(Buffer->FmtType);
+        case CUBIC_RESAMPLER:
+            return Select_Hrtf_cubic(Buffer->FmtType);
+        case RESAMPLER_MIN:
+        case RESAMPLER_MAX:
+            break;
+    }
+    return NULL;
 }
 
 
@@ -527,7 +556,6 @@ ALvoid MixSource(ALsource *Source, ALCdevice *Device, ALuint SamplesToDo)
     enum Resampler Resampler;
     ALenum State;
     ALuint OutPos;
-    ALuint NumChannels;
     ALuint FrameSize;
     ALint64 DataSize64;
     ALuint i;
@@ -540,8 +568,7 @@ ALvoid MixSource(ALsource *Source, ALCdevice *Device, ALuint SamplesToDo)
     Looping       = Source->bLooping;
     increment     = Source->Params.Step;
     Resampler     = Source->Resampler;
-    NumChannels   = Source->NumChannels;
-    FrameSize     = NumChannels * Source->SampleSize;
+    FrameSize     = Source->NumChannels * Source->SampleSize;
 
     /* Get current buffer queue item */
     BufferListItem = Source->queue;
@@ -552,8 +579,8 @@ ALvoid MixSource(ALsource *Source, ALCdevice *Device, ALuint SamplesToDo)
     do {
         const ALuint BufferPrePadding = ResamplerPrePadding[Resampler];
         const ALuint BufferPadding = ResamplerPadding[Resampler];
-        ALfloat StackData[STACK_DATA_SIZE/sizeof(ALfloat)];
-        ALfloat *SrcData = StackData;
+        ALubyte StackData[STACK_DATA_SIZE];
+        ALubyte *SrcData = StackData;
         ALuint SrcDataSize = 0;
         ALuint BufferSize;
 
@@ -563,10 +590,10 @@ ALvoid MixSource(ALsource *Source, ALCdevice *Device, ALuint SamplesToDo)
         DataSize64 += DataPosFrac+FRACTIONMASK;
         DataSize64 >>= FRACTIONBITS;
         DataSize64 += BufferPadding+BufferPrePadding;
-        DataSize64 *= NumChannels;
+        DataSize64 *= FrameSize;
 
-        BufferSize  = (ALuint)mini64(DataSize64, STACK_DATA_SIZE/sizeof(ALfloat));
-        BufferSize /= NumChannels;
+        BufferSize = ((DataSize64 > STACK_DATA_SIZE) ? STACK_DATA_SIZE : DataSize64);
+        BufferSize -= BufferSize%FrameSize;
 
         if(Source->lSourceType == AL_STATIC)
         {
@@ -581,14 +608,13 @@ ALvoid MixSource(ALsource *Source, ALCdevice *Device, ALuint SamplesToDo)
                 Looping = AL_FALSE;
 
                 if(DataPosInt >= BufferPrePadding)
-                    pos = DataPosInt - BufferPrePadding;
+                    pos = (DataPosInt-BufferPrePadding)*FrameSize;
                 else
                 {
-                    DataSize = BufferPrePadding - DataPosInt;
+                    DataSize = (BufferPrePadding-DataPosInt)*FrameSize;
                     DataSize = minu(BufferSize, DataSize);
 
-                    SilenceStack(&SrcData[SrcDataSize*NumChannels],
-                                 DataSize*NumChannels);
+                    memset(&SrcData[SrcDataSize], 0, DataSize);
                     SrcDataSize += DataSize;
                     BufferSize -= DataSize;
 
@@ -597,16 +623,14 @@ ALvoid MixSource(ALsource *Source, ALCdevice *Device, ALuint SamplesToDo)
 
                 /* Copy what's left to play in the source buffer, and clear the
                  * rest of the temp buffer */
-                DataSize = ALBuffer->SampleLen - pos;
+                DataSize = ALBuffer->size - pos;
                 DataSize = minu(BufferSize, DataSize);
 
-                LoadStack(&SrcData[SrcDataSize*NumChannels], &Data[pos*FrameSize],
-                          ALBuffer->FmtType, DataSize*NumChannels);
+                memcpy(&SrcData[SrcDataSize], &Data[pos], DataSize);
                 SrcDataSize += DataSize;
                 BufferSize -= DataSize;
 
-                SilenceStack(&SrcData[SrcDataSize*NumChannels],
-                             BufferSize*NumChannels);
+                memset(&SrcData[SrcDataSize], 0, BufferSize);
                 SrcDataSize += BufferSize;
                 BufferSize -= BufferSize;
             }
@@ -622,15 +646,16 @@ ALvoid MixSource(ALsource *Source, ALCdevice *Device, ALuint SamplesToDo)
                         pos += LoopEnd-LoopStart;
                     pos -= BufferPrePadding;
                     pos += LoopStart;
+                    pos *= FrameSize;
                 }
                 else if(DataPosInt >= BufferPrePadding)
-                    pos = DataPosInt - BufferPrePadding;
+                    pos = (DataPosInt-BufferPrePadding)*FrameSize;
                 else
                 {
-                    DataSize = BufferPrePadding - DataPosInt;
+                    DataSize = (BufferPrePadding-DataPosInt)*FrameSize;
                     DataSize = minu(BufferSize, DataSize);
 
-                    SilenceStack(&SrcData[SrcDataSize*NumChannels], DataSize*NumChannels);
+                    memset(&SrcData[SrcDataSize], 0, DataSize);
                     SrcDataSize += DataSize;
                     BufferSize -= DataSize;
 
@@ -639,21 +664,19 @@ ALvoid MixSource(ALsource *Source, ALCdevice *Device, ALuint SamplesToDo)
 
                 /* Copy what's left of this loop iteration, then copy repeats
                  * of the loop section */
-                DataSize = LoopEnd - pos;
+                DataSize = LoopEnd*FrameSize - pos;
                 DataSize = minu(BufferSize, DataSize);
 
-                LoadStack(&SrcData[SrcDataSize*NumChannels], &Data[pos*FrameSize],
-                          ALBuffer->FmtType, DataSize*NumChannels);
+                memcpy(&SrcData[SrcDataSize], &Data[pos], DataSize);
                 SrcDataSize += DataSize;
                 BufferSize -= DataSize;
 
-                DataSize = LoopEnd-LoopStart;
+                DataSize = (LoopEnd-LoopStart) * FrameSize;
                 while(BufferSize > 0)
                 {
                     DataSize = minu(BufferSize, DataSize);
 
-                    LoadStack(&SrcData[SrcDataSize*NumChannels], &Data[LoopStart*FrameSize],
-                              ALBuffer->FmtType, DataSize*NumChannels);
+                    memcpy(&SrcData[SrcDataSize], &Data[LoopStart*FrameSize], DataSize);
                     SrcDataSize += DataSize;
                     BufferSize -= DataSize;
                 }
@@ -662,21 +685,21 @@ ALvoid MixSource(ALsource *Source, ALCdevice *Device, ALuint SamplesToDo)
         else
         {
             /* Crawl the buffer queue to fill in the temp buffer */
-            ALbufferlistitem *tmpiter = BufferListItem;
+            ALbufferlistitem *BufferListIter = BufferListItem;
             ALuint pos;
 
             if(DataPosInt >= BufferPrePadding)
-                pos = DataPosInt - BufferPrePadding;
+                pos = (DataPosInt-BufferPrePadding)*FrameSize;
             else
             {
-                pos = BufferPrePadding - DataPosInt;
+                pos = (BufferPrePadding-DataPosInt)*FrameSize;
                 while(pos > 0)
                 {
-                    if(!tmpiter->prev && !Looping)
+                    if(!BufferListIter->prev && !Looping)
                     {
                         ALuint DataSize = minu(BufferSize, pos);
 
-                        SilenceStack(&SrcData[SrcDataSize*NumChannels], DataSize*NumChannels);
+                        memset(&SrcData[SrcDataSize], 0, DataSize);
                         SrcDataSize += DataSize;
                         BufferSize -= DataSize;
 
@@ -684,56 +707,55 @@ ALvoid MixSource(ALsource *Source, ALCdevice *Device, ALuint SamplesToDo)
                         break;
                     }
 
-                    if(tmpiter->prev)
-                        tmpiter = tmpiter->prev;
+                    if(BufferListIter->prev)
+                        BufferListIter = BufferListIter->prev;
                     else
                     {
-                        while(tmpiter->next)
-                            tmpiter = tmpiter->next;
+                        while(BufferListIter->next)
+                            BufferListIter = BufferListIter->next;
                     }
 
-                    if(tmpiter->buffer)
+                    if(BufferListIter->buffer)
                     {
-                        if((ALuint)tmpiter->buffer->SampleLen > pos)
+                        if((ALuint)BufferListIter->buffer->size > pos)
                         {
-                            pos = tmpiter->buffer->SampleLen - pos;
+                            pos = BufferListIter->buffer->size - pos;
                             break;
                         }
-                        pos -= tmpiter->buffer->SampleLen;
+                        pos -= BufferListIter->buffer->size;
                     }
                 }
             }
 
-            while(tmpiter && BufferSize > 0)
+            while(BufferListIter && BufferSize > 0)
             {
                 const ALbuffer *ALBuffer;
-                if((ALBuffer=tmpiter->buffer) != NULL)
+                if((ALBuffer=BufferListIter->buffer) != NULL)
                 {
                     const ALubyte *Data = ALBuffer->data;
-                    ALuint DataSize = ALBuffer->SampleLen;
+                    ALuint DataSize = ALBuffer->size;
 
                     /* Skip the data already played */
                     if(DataSize <= pos)
                         pos -= DataSize;
                     else
                     {
-                        Data += pos*FrameSize;
+                        Data += pos;
                         DataSize -= pos;
                         pos -= pos;
 
                         DataSize = minu(BufferSize, DataSize);
-                        LoadStack(&SrcData[SrcDataSize*NumChannels], Data,
-                                  ALBuffer->FmtType, DataSize*NumChannels);
+                        memcpy(&SrcData[SrcDataSize], Data, DataSize);
                         SrcDataSize += DataSize;
                         BufferSize -= DataSize;
                     }
                 }
-                tmpiter = tmpiter->next;
-                if(!tmpiter && Looping)
-                    tmpiter = Source->queue;
-                else if(!tmpiter)
+                BufferListIter = BufferListIter->next;
+                if(!BufferListIter && Looping)
+                    BufferListIter = Source->queue;
+                else if(!BufferListIter)
                 {
-                    SilenceStack(&SrcData[SrcDataSize*NumChannels], BufferSize*NumChannels);
+                    memset(&SrcData[SrcDataSize], 0, BufferSize);
                     SrcDataSize += BufferSize;
                     BufferSize -= BufferSize;
                 }
@@ -741,7 +763,7 @@ ALvoid MixSource(ALsource *Source, ALCdevice *Device, ALuint SamplesToDo)
         }
 
         /* Figure out how many samples we can mix. */
-        DataSize64  = SrcDataSize;
+        DataSize64  = SrcDataSize / FrameSize;
         DataSize64 -= BufferPadding+BufferPrePadding;
         DataSize64 <<= FRACTIONBITS;
         DataSize64 -= increment;
@@ -750,7 +772,7 @@ ALvoid MixSource(ALsource *Source, ALCdevice *Device, ALuint SamplesToDo)
         BufferSize = (ALuint)((DataSize64+(increment-1)) / increment);
         BufferSize = minu(BufferSize, (SamplesToDo-OutPos));
 
-        SrcData += BufferPrePadding*NumChannels;
+        SrcData += BufferPrePadding*FrameSize;
         Source->Params.DoMix(Source, Device, SrcData, &DataPosInt, &DataPosFrac,
                              OutPos, SamplesToDo, BufferSize);
         OutPos += BufferSize;
@@ -765,7 +787,7 @@ ALvoid MixSource(ALsource *Source, ALCdevice *Device, ALuint SamplesToDo)
 
             if((ALBuffer=BufferListItem->buffer) != NULL)
             {
-                DataSize = ALBuffer->SampleLen;
+                DataSize = ALBuffer->size / FrameSize;
                 LoopStart = ALBuffer->LoopStart;
                 LoopEnd = ALBuffer->LoopEnd;
                 if(LoopEnd > DataPosInt)
@@ -774,6 +796,7 @@ ALvoid MixSource(ALsource *Source, ALCdevice *Device, ALuint SamplesToDo)
 
             if(Looping && Source->lSourceType == AL_STATIC)
             {
+                BufferListItem = Source->queue;
                 DataPosInt = ((DataPosInt-LoopStart)%(LoopEnd-LoopStart)) + LoopStart;
                 break;
             }

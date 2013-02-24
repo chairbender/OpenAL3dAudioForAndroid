@@ -31,10 +31,6 @@
 #include "AL/al.h"
 #include "AL/alc.h"
 
-#ifndef WAVE_FORMAT_IEEE_FLOAT
-#define WAVE_FORMAT_IEEE_FLOAT  0x0003
-#endif
-
 
 typedef struct {
     // MMSYSTEM Device
@@ -42,7 +38,7 @@ typedef struct {
     HANDLE  hWaveThreadEvent;
     HANDLE  hWaveThread;
     DWORD   ulWaveThreadID;
-    volatile LONG lWaveBuffersCommitted;
+    LONG    lWaveBuffersCommitted;
     WAVEHDR WaveBuffer[4];
 
     union {
@@ -160,8 +156,22 @@ static void CALLBACK WaveOutProc(HWAVEOUT hDevice,UINT uMsg,DWORD_PTR dwInstance
     if(uMsg != WOM_DONE)
         return;
 
+    // Decrement number of buffers in use
     InterlockedDecrement(&pData->lWaveBuffersCommitted);
-    PostThreadMessage(pData->ulWaveThreadID, uMsg, 0, dwParam1);
+
+    if(pData->bWaveShutdown == AL_FALSE)
+    {
+        // Notify Wave Processor Thread that a Wave Header has returned
+        PostThreadMessage(pData->ulWaveThreadID, uMsg, 0, dwParam1);
+    }
+    else
+    {
+        if(pData->lWaveBuffersCommitted == 0)
+        {
+            // Post 'Quit' Message to WaveOut Processor Thread
+            PostThreadMessage(pData->ulWaveThreadID, WM_QUIT, 0, 0);
+        }
+    }
 }
 
 /*
@@ -184,15 +194,8 @@ static DWORD WINAPI PlaybackThreadProc(LPVOID lpParameter)
 
     while(GetMessage(&msg, NULL, 0, 0))
     {
-        if(msg.message != WOM_DONE)
+        if(msg.message != WOM_DONE || pData->bWaveShutdown)
             continue;
-
-        if(pData->bWaveShutdown)
-        {
-            if(pData->lWaveBuffersCommitted == 0)
-                break;
-            continue;
-        }
 
         pWaveHdr = ((LPWAVEHDR)msg.lParam);
 
@@ -229,8 +232,22 @@ static void CALLBACK WaveInProc(HWAVEIN hDevice,UINT uMsg,DWORD_PTR dwInstance,D
     if(uMsg != WIM_DATA)
         return;
 
+    // Decrement number of buffers in use
     InterlockedDecrement(&pData->lWaveBuffersCommitted);
-    PostThreadMessage(pData->ulWaveThreadID,uMsg,0,dwParam1);
+
+    if(pData->bWaveShutdown == AL_FALSE)
+    {
+        // Notify Wave Processor Thread that a Wave Header has returned
+        PostThreadMessage(pData->ulWaveThreadID,uMsg,0,dwParam1);
+    }
+    else
+    {
+        if(pData->lWaveBuffersCommitted == 0)
+        {
+            // Post 'Quit' Message to WaveIn Processor Thread
+            PostThreadMessage(pData->ulWaveThreadID,WM_QUIT,0,0);
+        }
+    }
 }
 
 /*
@@ -251,12 +268,8 @@ static DWORD WINAPI CaptureThreadProc(LPVOID lpParameter)
 
     while(GetMessage(&msg, NULL, 0, 0))
     {
-        if(msg.message != WIM_DATA)
+        if(msg.message != WIM_DATA || pData->bWaveShutdown)
             continue;
-        /* Don't wait for other buffers to finish before quitting. We're
-         * closing so we don't need them. */
-        if(pData->bWaveShutdown)
-            break;
 
         pWaveHdr = ((LPWAVEHDR)msg.lParam);
 
@@ -328,18 +341,16 @@ static ALCenum WinMMOpenPlayback(ALCdevice *pDevice, const ALCchar *deviceName)
             pDevice->FmtType = DevFmtUByte;
             break;
         case DevFmtUShort:
+        case DevFmtFloat:
             pDevice->FmtType = DevFmtShort;
             break;
         case DevFmtUByte:
         case DevFmtShort:
-        case DevFmtFloat:
             break;
     }
 
-retry_open:
     memset(&wfexFormat, 0, sizeof(WAVEFORMATEX));
-    wfexFormat.wFormatTag = ((pDevice->FmtType == DevFmtFloat) ?
-                             WAVE_FORMAT_IEEE_FLOAT : WAVE_FORMAT_PCM);
+    wfexFormat.wFormatTag = WAVE_FORMAT_PCM;
     wfexFormat.nChannels = ChannelsFromDevFmt(pDevice->FmtChans);
     wfexFormat.wBitsPerSample = BytesFromDevFmt(pDevice->FmtType) * 8;
     wfexFormat.nBlockAlign = wfexFormat.wBitsPerSample *
@@ -351,11 +362,6 @@ retry_open:
 
     if((res=waveOutOpen(&pData->hWaveHandle.Out, lDeviceID, &wfexFormat, (DWORD_PTR)&WaveOutProc, (DWORD_PTR)pDevice, CALLBACK_FUNCTION)) != MMSYSERR_NOERROR)
     {
-        if(pDevice->FmtType == DevFmtFloat)
-        {
-            pDevice->FmtType = DevFmtShort;
-            goto retry_open;
-        }
         ERR("waveOutOpen failed: %u\n", res);
         goto failure;
     }
@@ -413,7 +419,13 @@ static ALCboolean WinMMResetPlayback(ALCdevice *device)
 
     device->UpdateSize = (ALuint)((ALuint64)device->UpdateSize *
                                   pData->Frequency / device->Frequency);
-    device->Frequency = pData->Frequency;
+    if(device->Frequency != pData->Frequency)
+    {
+        if((device->Flags&DEVICE_FREQUENCY_REQUEST))
+            ERR("WinMM does not support changing sample rates (wanted %dhz, got %dhz)\n", device->Frequency, pData->Frequency);
+        device->Flags &= ~DEVICE_FREQUENCY_REQUEST;
+        device->Frequency = pData->Frequency;
+    }
 
     SetDefaultWFXChannelOrder(device);
 
@@ -517,13 +529,11 @@ static ALCenum WinMMOpenCapture(ALCdevice *pDevice, const ALCchar *deviceName)
     pDevice->ExtraData = pData;
 
     if((pDevice->FmtChans != DevFmtMono && pDevice->FmtChans != DevFmtStereo) ||
-       (pDevice->FmtType != DevFmtUByte && pDevice->FmtType != DevFmtShort &&
-        pDevice->FmtType != DevFmtFloat))
+       (pDevice->FmtType != DevFmtUByte && pDevice->FmtType != DevFmtShort))
         goto failure;
 
     memset(&wfexCaptureFormat, 0, sizeof(WAVEFORMATEX));
-    wfexCaptureFormat.wFormatTag = ((pDevice->FmtType == DevFmtFloat) ?
-                                    WAVE_FORMAT_IEEE_FLOAT : WAVE_FORMAT_PCM);
+    wfexCaptureFormat.wFormatTag = WAVE_FORMAT_PCM;
     wfexCaptureFormat.nChannels = ChannelsFromDevFmt(pDevice->FmtChans);
     wfexCaptureFormat.wBitsPerSample = BytesFromDevFmt(pDevice->FmtType) * 8;
     wfexCaptureFormat.nBlockAlign = wfexCaptureFormat.wBitsPerSample *
@@ -621,14 +631,12 @@ static void WinMMCloseCapture(ALCdevice *pDevice)
     void *buffer = NULL;
     int i;
 
-    /* Tell the processing thread to quit and wait for it to do so. */
+    // Call waveOutReset to shutdown wave device
     pData->bWaveShutdown = AL_TRUE;
-    PostThreadMessage(pData->ulWaveThreadID, WM_QUIT, 0, 0);
-
-    WaitForSingleObjectEx(pData->hWaveThreadEvent, 5000, FALSE);
-
-    /* Make sure capture is stopped and all pending buffers are flushed. */
     waveInReset(pData->hWaveHandle.In);
+
+    // Wait for signal that Wave Thread has been destroyed
+    WaitForSingleObjectEx(pData->hWaveThreadEvent, 5000, FALSE);
 
     CloseHandle(pData->hWaveThread);
     pData->hWaveThread = 0;

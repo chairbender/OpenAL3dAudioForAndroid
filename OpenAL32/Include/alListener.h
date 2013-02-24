@@ -13,7 +13,6 @@ typedef struct ALlistener_struct
     volatile ALfloat Velocity[3];
     volatile ALfloat Forward[3];
     volatile ALfloat Up[3];
-    volatile ALfloat Matrix[4][4];
     volatile ALfloat Gain;
     volatile ALfloat MetersPerUnit;
 } ALlistener;

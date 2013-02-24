@@ -48,10 +48,6 @@ DEFINE_GUID(IID_IAudioRenderClient,   0xf294acfc, 0x3146, 0x4483, 0xa7,0xbf, 0xa
 
 #include "alMain.h"
 
-#ifdef ANDROID
-#include <android/log.h>
-#endif
-
 #ifdef _WIN32
 void pthread_once(pthread_once_t *once, void (*callback)(void))
 {
@@ -211,7 +207,7 @@ void *GetSymbol(void *handle, const char *name)
     sym = dlsym(handle, name);
     if((err=dlerror()) != NULL)
     {
-        WARN("Failed to load %s: %s\n", name, err);
+        ERR("Failed to load %s: %s\n", name, err);
         sym = NULL;
     }
     return sym;
@@ -238,11 +234,6 @@ void al_print(const char *func, const char *fmt, ...)
 
     fprintf(LogFile, "%s", str);
     fflush(LogFile);
-
-
-#ifdef ANDROID
-    __android_log_write(ANDROID_LOG_WARN, "OpenAL", str);
-#endif
 }
 
 
@@ -346,6 +337,12 @@ ALenum InsertUIntMapEntry(UIntMap *map, ALuint key, ALvoid *value)
     ALsizei pos = 0;
 
     WriteLock(&map->lock);
+    if(map->size == map->limit)
+    {
+        WriteUnlock(&map->lock);
+        return AL_OUT_OF_MEMORY;
+    }
+
     if(map->size > 0)
     {
         ALsizei low = 0;
@@ -365,12 +362,6 @@ ALenum InsertUIntMapEntry(UIntMap *map, ALuint key, ALvoid *value)
 
     if(pos == map->size || map->array[pos].key != key)
     {
-        if(map->size == map->limit)
-        {
-            WriteUnlock(&map->lock);
-            return AL_OUT_OF_MEMORY;
-        }
-
         if(map->size == map->maxsize)
         {
             ALvoid *temp = NULL;
@@ -388,10 +379,10 @@ ALenum InsertUIntMapEntry(UIntMap *map, ALuint key, ALvoid *value)
             map->maxsize = newsize;
         }
 
-        if(pos < map->size)
-            memmove(&map->array[pos+1], &map->array[pos],
-                    (map->size-pos)*sizeof(map->array[0]));
         map->size++;
+        if(pos < map->size-1)
+            memmove(&map->array[pos+1], &map->array[pos],
+                    (map->size-1-pos)*sizeof(map->array[0]));
     }
     map->array[pos].key = key;
     map->array[pos].value = value;
@@ -400,7 +391,56 @@ ALenum InsertUIntMapEntry(UIntMap *map, ALuint key, ALvoid *value)
     return AL_NO_ERROR;
 }
 
-ALvoid *RemoveUIntMapKey(UIntMap *map, ALuint key)
+void RemoveUIntMapKey(UIntMap *map, ALuint key)
+{
+    WriteLock(&map->lock);
+    if(map->size > 0)
+    {
+        ALsizei low = 0;
+        ALsizei high = map->size - 1;
+        while(low < high)
+        {
+            ALsizei mid = low + (high-low)/2;
+            if(map->array[mid].key < key)
+                low = mid + 1;
+            else
+                high = mid;
+        }
+        if(map->array[low].key == key)
+        {
+            if(low < map->size-1)
+                memmove(&map->array[low], &map->array[low+1],
+                        (map->size-1-low)*sizeof(map->array[0]));
+            map->size--;
+        }
+    }
+    WriteUnlock(&map->lock);
+}
+
+ALvoid *LookupUIntMapKey(UIntMap *map, ALuint key)
+{
+    ALvoid *ptr = NULL;
+    ReadLock(&map->lock);
+    if(map->size > 0)
+    {
+        ALsizei low = 0;
+        ALsizei high = map->size - 1;
+        while(low < high)
+        {
+            ALsizei mid = low + (high-low)/2;
+            if(map->array[mid].key < key)
+                low = mid + 1;
+            else
+                high = mid;
+        }
+        if(map->array[low].key == key)
+            ptr = map->array[low].value;
+    }
+    ReadUnlock(&map->lock);
+    return ptr;
+}
+
+ALvoid *PopUIntMapValue(UIntMap *map, ALuint key)
 {
     ALvoid *ptr = NULL;
     WriteLock(&map->lock);
@@ -426,28 +466,5 @@ ALvoid *RemoveUIntMapKey(UIntMap *map, ALuint key)
         }
     }
     WriteUnlock(&map->lock);
-    return ptr;
-}
-
-ALvoid *LookupUIntMapKey(UIntMap *map, ALuint key)
-{
-    ALvoid *ptr = NULL;
-    ReadLock(&map->lock);
-    if(map->size > 0)
-    {
-        ALsizei low = 0;
-        ALsizei high = map->size - 1;
-        while(low < high)
-        {
-            ALsizei mid = low + (high-low)/2;
-            if(map->array[mid].key < key)
-                low = mid + 1;
-            else
-                high = mid;
-        }
-        if(map->array[low].key == key)
-            ptr = map->array[low].value;
-    }
-    ReadUnlock(&map->lock);
     return ptr;
 }

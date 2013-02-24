@@ -17,7 +17,6 @@ INCLUDE(CheckSymbolExists)
 INCLUDE(CheckCCompilerFlag)
 INCLUDE(CheckCSourceCompiles)
 INCLUDE(CheckTypeSize)
-INCLUDE(FindPkgConfig)
 
 
 PROJECT(OpenAL C)
@@ -37,6 +36,8 @@ OPTION(PORTAUDIO  "Check for PortAudio backend"        ON)
 OPTION(PULSEAUDIO "Check for PulseAudio backend"       ON)
 OPTION(COREAUDIO  "Check for CoreAudio backend"        ON)
 OPTION(OPENSL     "Check for OpenSL backend"           ON)
+OPTION(ANDROID    "Check for Android backend"          ON)
+OPTION(ANDROID_LOW_LATENCY "Enable Android low-latency backend" ON)
 OPTION(WAVE    "Enable Wave Writer backend"            ON)
 
 OPTION(REQUIRE_ALSA       "Require ALSA backend"               OFF)
@@ -50,14 +51,13 @@ OPTION(REQUIRE_PORTAUDIO  "Require PortAudio backend"          OFF)
 OPTION(REQUIRE_PULSEAUDIO "Require PulseAudio backend"         OFF)
 OPTION(REQUIRE_COREAUDIO  "Require CoreAudio backend"          OFF)
 OPTION(REQUIRE_OPENSL     "Require OpenSL backend"             OFF)
+OPTION(REQUIRE_ANDROID    "Require Android backend"            OFF)
 
 OPTION(DLOPEN  "Check for the dlopen API for loading optional libs"  ON)
 
 OPTION(WERROR  "Treat compile warnings as errors"      OFF)
 
 OPTION(UTILS  "Build and install utility programs"  ON)
-
-OPTION(EXAMPLES  "Build and install example programs"  ON)
 
 OPTION(ALSOFT_CONFIG "Install alsoft.conf configuration file" OFF)
 
@@ -184,8 +184,7 @@ IF(WIN32)
     ENDIF()
 ELSE()
     SET(OLD_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS}")
-    # Yes GCC, really don't accept visibility modes you don't support
-    SET(CMAKE_REQUIRED_FLAGS "${OLD_REQUIRED_FLAGS} -Wattributes -Werror")
+    SET(CMAKE_REQUIRED_FLAGS "${OLD_REQUIRED_FLAGS} -Werror")
 
     CHECK_C_SOURCE_COMPILES("int foo() __attribute__((visibility(\"protected\")));
                              int main() {return 0;}" HAVE_GCC_PROTECTED_VISIBILITY)
@@ -199,15 +198,13 @@ ELSE()
         ENDIF()
     ENDIF()
 
-    IF(HAVE_GCC_PROTECTED_VISIBILITY OR HAVE_GCC_DEFAULT_VISIBILITY)
-        CHECK_C_COMPILER_FLAG(-fvisibility=internal HAVE_VISIBILITY_INTERNAL_SWITCH)
-        IF(HAVE_VISIBILITY_INTERNAL_SWITCH)
-            ADD_DEFINITIONS(-fvisibility=internal)
-        ELSE()
-            CHECK_C_COMPILER_FLAG(-fvisibility=hidden HAVE_VISIBILITY_HIDDEN_SWITCH)
-            IF(HAVE_VISIBILITY_HIDDEN_SWITCH)
-                ADD_DEFINITIONS(-fvisibility=hidden)
-            ENDIF()
+    CHECK_C_COMPILER_FLAG(-fvisibility=internal HAVE_VISIBILITY_INTERNAL_SWITCH)
+    IF(HAVE_VISIBILITY_INTERNAL_SWITCH)
+        ADD_DEFINITIONS(-fvisibility=internal)
+    ELSE()
+        CHECK_C_COMPILER_FLAG(-fvisibility=hidden HAVE_VISIBILITY_HIDDEN_SWITCH)
+        IF(HAVE_VISIBILITY_HIDDEN_SWITCH)
+            ADD_DEFINITIONS(-fvisibility=hidden)
         ENDIF()
     ENDIF()
 
@@ -218,7 +215,6 @@ CHECK_C_SOURCE_COMPILES("int foo(const char *str, ...) __attribute__((format(pri
                          int main() {return 0;}" HAVE_GCC_FORMAT)
 
 CHECK_INCLUDE_FILE(fenv.h HAVE_FENV_H)
-CHECK_INCLUDE_FILE(fpu_control.h HAVE_FPU_CONTROL_H)
 CHECK_INCLUDE_FILE(float.h HAVE_FLOAT_H)
 CHECK_INCLUDE_FILE(ieeefp.h HAVE_IEEEFP_H)
 CHECK_INCLUDE_FILE(guiddef.h HAVE_GUIDDEF_H)
@@ -227,30 +223,17 @@ IF(NOT HAVE_GUIDDEF_H)
 ENDIF()
 CHECK_INCLUDE_FILE(arm_neon.h HAVE_ARM_NEON_H)
 
-# Some systems need libm for some of the following math functions to work
-CHECK_LIBRARY_EXISTS(m pow "" HAVE_LIBM)
-IF(HAVE_LIBM)
-    SET(EXTRA_LIBS m ${EXTRA_LIBS})
-    SET(CMAKE_REQUIRED_LIBRARIES ${CMAKE_REQUIRED_LIBRARIES} m)
-ENDIF()
-
-
-CHECK_SYMBOL_EXISTS(powf   math.h HAVE_POWF)
-CHECK_SYMBOL_EXISTS(sqrtf  math.h HAVE_SQRTF)
-CHECK_SYMBOL_EXISTS(cosf   math.h HAVE_COSF)
-CHECK_SYMBOL_EXISTS(sinf   math.h HAVE_SINF)
-CHECK_SYMBOL_EXISTS(acosf  math.h HAVE_ACOSF)
-CHECK_SYMBOL_EXISTS(asinf  math.h HAVE_ASINF)
-CHECK_SYMBOL_EXISTS(atanf  math.h HAVE_ATANF)
-CHECK_SYMBOL_EXISTS(atan2f math.h HAVE_ATAN2F)
-CHECK_SYMBOL_EXISTS(fabsf  math.h HAVE_FABSF)
-CHECK_SYMBOL_EXISTS(log10f math.h HAVE_LOG10F)
-CHECK_SYMBOL_EXISTS(floorf math.h HAVE_FLOORF)
-
+CHECK_LIBRARY_EXISTS(m  powf   "" HAVE_POWF)
+CHECK_LIBRARY_EXISTS(m  sqrtf  "" HAVE_SQRTF)
+CHECK_LIBRARY_EXISTS(m  acosf  "" HAVE_ACOSF)
+CHECK_LIBRARY_EXISTS(m  atanf  "" HAVE_ATANF)
+CHECK_LIBRARY_EXISTS(m  fabsf  "" HAVE_FABSF)
 IF(HAVE_FENV_H)
-    CHECK_SYMBOL_EXISTS(fesetround fenv.h HAVE_FESETROUND)
+    CHECK_LIBRARY_EXISTS(m  fesetround  "" HAVE_FESETROUND)
 ENDIF()
-
+IF(HAVE_SQRTF OR HAVE_ACOSF OR HAVE_ATANF OR HAVE_FABSF OR HAVE_FESETROUND)
+    SET(EXTRA_LIBS m ${EXTRA_LIBS})
+ENDIF()
 CHECK_FUNCTION_EXISTS(strtof HAVE_STRTOF)
 CHECK_FUNCTION_EXISTS(_controlfp HAVE__CONTROLFP)
 
@@ -441,6 +424,7 @@ SET(HAVE_PORTAUDIO  0)
 SET(HAVE_PULSEAUDIO 0)
 SET(HAVE_COREAUDIO  0)
 SET(HAVE_OPENSL     0)
+SET(HAVE_ANDROID    0)
 SET(HAVE_WAVE       0)
 
 # Check ALSA backend
@@ -615,18 +599,6 @@ IF(COREAUDIO)
         SET(EXTRA_LIBS /System/Library/Frameworks/CoreAudio.framework ${EXTRA_LIBS})
         SET(EXTRA_LIBS /System/Library/Frameworks/AudioUnit.framework ${EXTRA_LIBS})
         SET(EXTRA_LIBS /System/Library/Frameworks/ApplicationServices.framework ${EXTRA_LIBS})
-
-        # Some versions of OSX may need the AudioToolbox framework. Add it if
-        # it's found.
-        FIND_LIBRARY(AUDIOTOOLBOX_LIBRARY
-                     NAMES AudioToolbox
-                     PATHS ~/Library/Frameworks
-                           /Library/Frameworks
-                           /System/Library/Frameworks
-                    )
-        IF(AUDIOTOOLBOX_LIBRARY)
-            SET(EXTRA_LIBS ${AUDIOTOOLBOX_LIBRARY} ${EXTRA_LIBS})
-        ENDIF()
     ENDIF()
 ENDIF()
 IF(REQUIRE_COREAUDIO AND NOT HAVE_COREAUDIO)
@@ -650,6 +622,25 @@ IF(REQUIRE_OPENSL AND NOT HAVE_OPENSL)
     MESSAGE(FATAL_ERROR "Failed to enabled required OpenSL backend")
 ENDIF()
 
+# Check for Android backend
+IF(ANDROID)
+    CHECK_INCLUDE_FILE(android/api-level.h HAVE_ANDROID_API_LEVEL_H)
+    IF(HAVE_ANDROID_API_LEVEL_H)
+        CHECK_SYMBOL_EXISTS(__ANDROID_API__ "android/api-level.h" HAVE_ANDROID_INTERNAL)
+        IF(HAVE_ANDROID_INTERNAL)
+            SET(HAVE_ANDROID 1)
+            SET(ALC_OBJS  ${ALC_OBJS} Alc/backends/android.c)
+            SET(BACKENDS  "${BACKENDS} Android,")
+            IF(ANDROID_LOW_LATENCY)
+                SET(HAVE_ANDROID_LOW_LATENCY 1)
+            ENDIF()
+        ENDIF()
+    ENDIF()
+ENDIF()
+IF(REQUIRE_ANDROID AND NOT HAVE_ANDROID)
+    MESSAGE(FATAL_ERROR "Failed to enabled required Android backend")
+ENDIF()
+
 # Optionally enable the Wave Writer backend
 IF(WAVE)
     SET(HAVE_WAVE 1)
@@ -659,10 +650,6 @@ ENDIF()
 
 # This is always available
 SET(BACKENDS  "${BACKENDS} Null")
-
-IF(EXAMPLES)
-    PKG_CHECK_MODULES(FFMPEG libavcodec libavformat)
-ENDIF()
 
 IF(LIBTYPE STREQUAL "STATIC")
     ADD_DEFINITIONS(-DAL_LIBTYPE_STATIC)
@@ -709,7 +696,6 @@ INSTALL(FILES include/AL/al.h
               include/AL/alext.h
               include/AL/efx.h
               include/AL/efx-creative.h
-              include/AL/efx-presets.h
         DESTINATION include/AL
 )
 INSTALL(FILES "${OpenAL_BINARY_DIR}/openal.pc"
@@ -749,20 +735,4 @@ IF(UTILS)
     )
     MESSAGE(STATUS "Building utility programs")
     MESSAGE(STATUS "")
-ENDIF()
-
-IF(EXAMPLES)
-    IF(FFMPEG_FOUND)
-        ADD_EXECUTABLE(alstream examples/alhelpers.c examples/alffmpeg.c examples/alstream.c)
-        TARGET_LINK_LIBRARIES(alstream ${FFMPEG_LIBRARIES} ${LIBNAME})
-        SET_TARGET_PROPERTIES(alstream PROPERTIES COMPILE_FLAGS "${FFMPEG_CFLAGS}")
-        INSTALL(TARGETS alstream
-                RUNTIME DESTINATION bin
-                LIBRARY DESTINATION "lib${LIB_SUFFIX}"
-                ARCHIVE DESTINATION "lib${LIB_SUFFIX}"
-        )
-
-        MESSAGE(STATUS "Building ffmpeg example programs")
-        MESSAGE(STATUS "")
-    ENDIF()
 ENDIF()

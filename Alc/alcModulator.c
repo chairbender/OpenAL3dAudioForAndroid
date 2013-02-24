@@ -50,22 +50,21 @@ typedef struct ALmodulatorState {
 } ALmodulatorState;
 
 #define WAVEFORM_FRACBITS  16
-#define WAVEFORM_FRACONE   (1<<WAVEFORM_FRACBITS)
-#define WAVEFORM_FRACMASK  (WAVEFORM_FRACONE-1)
+#define WAVEFORM_FRACMASK  ((1<<WAVEFORM_FRACBITS)-1)
 
-static __inline ALfloat Sin(ALuint index)
+static __inline ALdouble Sin(ALuint index)
 {
-    return aluSin(index * (F_PI*2.0f / WAVEFORM_FRACONE));
+    return sin(index * (M_PI*2.0 / (1<<WAVEFORM_FRACBITS)));
 }
 
-static __inline ALfloat Saw(ALuint index)
+static __inline ALdouble Saw(ALuint index)
 {
-    return index*(2.0f/WAVEFORM_FRACONE) - 1.0f;
+    return index*(2.0/(1<<WAVEFORM_FRACBITS)) - 1.0;
 }
 
-static __inline ALfloat Square(ALuint index)
+static __inline ALdouble Square(ALuint index)
 {
-    return ((index>>(WAVEFORM_FRACBITS-1))&1)*2.0f - 1.0f;
+    return (index&(1<<(WAVEFORM_FRACBITS-1))) ? -1.0 : 1.0;
 }
 
 
@@ -89,7 +88,7 @@ static void Process##func(ALmodulatorState *state, ALuint SamplesToDo,        \
     const ALuint step = state->step;                                          \
     ALuint index = state->index;                                              \
     ALfloat samp;                                                             \
-    ALuint i, k;                                                              \
+    ALuint i;                                                                 \
                                                                               \
     for(i = 0;i < SamplesToDo;i++)                                            \
     {                                                                         \
@@ -101,8 +100,14 @@ static void Process##func(ALmodulatorState *state, ALuint SamplesToDo,        \
                                                                               \
         samp = hpFilter1P(&state->iirFilter, 0, samp);                        \
                                                                               \
-        for(k = 0;k < MAXCHANNELS;k++)                                        \
-            SamplesOut[i][k] += state->Gain[k] * samp;                        \
+        SamplesOut[i][FRONT_LEFT]   += state->Gain[FRONT_LEFT]   * samp;      \
+        SamplesOut[i][FRONT_RIGHT]  += state->Gain[FRONT_RIGHT]  * samp;      \
+        SamplesOut[i][FRONT_CENTER] += state->Gain[FRONT_CENTER] * samp;      \
+        SamplesOut[i][SIDE_LEFT]    += state->Gain[SIDE_LEFT]    * samp;      \
+        SamplesOut[i][SIDE_RIGHT]   += state->Gain[SIDE_RIGHT]   * samp;      \
+        SamplesOut[i][BACK_LEFT]    += state->Gain[BACK_LEFT]    * samp;      \
+        SamplesOut[i][BACK_RIGHT]   += state->Gain[BACK_RIGHT]   * samp;      \
+        SamplesOut[i][BACK_CENTER]  += state->Gain[BACK_CENTER]  * samp;      \
     }                                                                         \
     state->index = index;                                                     \
 }
@@ -141,17 +146,17 @@ static ALvoid ModulatorUpdate(ALeffectState *effect, ALCcontext *Context, const 
     else if(Slot->effect.Modulator.Waveform == AL_RING_MODULATOR_SQUARE)
         state->Waveform = SQUARE;
 
-    state->step = fastf2u(Slot->effect.Modulator.Frequency*WAVEFORM_FRACONE /
-                          Device->Frequency);
-    if(state->step == 0) state->step = 1;
+    state->step = Slot->effect.Modulator.Frequency*(1<<WAVEFORM_FRACBITS) /
+                  Device->Frequency;
+    if(!state->step)
+        state->step = 1;
 
-    cw = aluCos(F_PI*2.0f * Slot->effect.Modulator.HighPassCutoff /
-                            Device->Frequency);
+    cw = cos(2.0*M_PI * Slot->effect.Modulator.HighPassCutoff /
+                        Device->Frequency);
     a = (2.0f-cw) - aluSqrt(aluPow(2.0f-cw, 2.0f) - 1.0f);
     state->iirFilter.coeff = a;
 
-    gain = aluSqrt(1.0f/Device->NumChan);
-    gain *= Slot->Gain;
+    gain = Slot->Gain;
     for(index = 0;index < MAXCHANNELS;index++)
         state->Gain[index] = 0.0f;
     for(index = 0;index < Device->NumChan;index++)
@@ -194,8 +199,8 @@ ALeffectState *ModulatorCreate(void)
     state->state.Update = ModulatorUpdate;
     state->state.Process = ModulatorProcess;
 
-    state->index = 0;
-    state->step = 1;
+    state->index = 0.0f;
+    state->step = 1.0f;
 
     state->iirFilter.coeff = 0.0f;
     state->iirFilter.history[0] = 0.0f;

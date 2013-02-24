@@ -27,10 +27,12 @@
 #include "AL/al.h"
 #include "AL/alc.h"
 
-static const ALCchar android_device[] = "Android Default";
+//Added by kwhipke
+#define HAVE_ANDROID_LOW_LATENCY 1
+
+static const ALCchar android_device[] = "Android Legacy";
 
 static JavaVM* javaVM = NULL;
-static pthread_key_t javaDetach = 0;
 
 static jclass cAudioTrack = NULL;
 
@@ -41,39 +43,17 @@ static jmethodID mStop;
 static jmethodID mRelease;
 static jmethodID mWrite;
 
-static void onJavaDetach(void* arg)
-{
-    (*javaVM)->DetachCurrentThread(javaVM);
-    pthread_setspecific(javaDetach, NULL);
-}
-
 jint JNI_OnLoad(JavaVM* vm, void* reserved)
 {
+	(void)reserved;
     javaVM = vm;
-    pthread_key_create(&javaDetach, onJavaDetach);
     return JNI_VERSION_1_2;
 }
 
 static JNIEnv* GetEnv()
 {
     JNIEnv* env = NULL;
-    int err = (*javaVM)->GetEnv(javaVM, (void**)&env, JNI_VERSION_1_2);
-    if (err ==  JNI_EDETACHED)
-    {
-        int err = (*javaVM)->AttachCurrentThread(javaVM, &env, NULL);
-        if (err != 0)
-        {
-            AL_PRINT("Error attaching to current thread!");
-            exit(1);
-        }
-
-        pthread_setspecific(javaDetach, env);
-    }
-    else if (err != JNI_OK)
-    {
-        AL_PRINT("Error getting JNIEnv!");
-        exit(1);
-    }
+    if (javaVM) (*javaVM)->GetEnv(javaVM, (void**)&env, JNI_VERSION_1_2);
     return env;
 }
 
@@ -112,7 +92,12 @@ static void* thread_function(void* arg)
     jobject track = (*env)->NewObject(env, cAudioTrack, mAudioTrack,
         STREAM_MUSIC, sampleRateInHz, channelConfig, audioFormat, device->NumUpdates * bufferSizeInBytes, MODE_STREAM);
 
+#ifdef HAVE_ANDROID_LOW_LATENCY
+    int started = 0;
+    size_t overallBytes = 0;
+#else
     (*env)->CallNonvirtualVoidMethod(env, track, cAudioTrack, mPlay);
+#endif
 
     jarray buffer = (*env)->NewByteArray(env, bufferSizeInBytes);
 
@@ -125,7 +110,26 @@ static void* thread_function(void* arg)
             aluMixData(device, pBuffer, bufferSizeInSamples);
             (*env)->ReleasePrimitiveArrayCritical(env, buffer, pBuffer, 0);
 
-            (*env)->CallNonvirtualIntMethod(env, track, cAudioTrack, mWrite, buffer, 0, bufferSizeInBytes);
+#ifdef HAVE_ANDROID_LOW_LATENCY
+            if (bufferSizeInBytes >= 0)
+            {
+                if (started)
+                {
+#endif
+                    (*env)->CallNonvirtualIntMethod(env, track, cAudioTrack, mWrite, buffer, 0, bufferSizeInBytes);
+#ifdef HAVE_ANDROID_LOW_LATENCY
+                }
+                else
+                {
+                    overallBytes += (*env)->CallNonvirtualIntMethod(env, track, cAudioTrack, mWrite, buffer, 0, bufferSizeInBytes);
+                    if (overallBytes >= (device->NumUpdates * bufferSizeInBytes))
+                    {
+                        (*env)->CallNonvirtualVoidMethod(env, track, cAudioTrack, mPlay);
+                        started = 1;
+                    }
+                }
+            }
+#endif
         }
         else
         {
@@ -146,8 +150,6 @@ static ALCenum android_open_playback(ALCdevice *device, const ALCchar *deviceNam
 {
     JNIEnv* env = GetEnv();
     AndroidData* data;
-    int channels;
-    int bytes;
 
     if (!cAudioTrack)
     {
@@ -159,7 +161,7 @@ static ALCenum android_open_playback(ALCdevice *device, const ALCchar *deviceNam
         if (!cAudioTrack)
         {
             AL_PRINT("android.media.AudioTrack class is not found. Are you running at least 1.5 version?");
-            return ALC_FALSE;
+            return ALC_INVALID_VALUE;
         }
 
         cAudioTrack = (*env)->NewGlobalRef(env, cAudioTrack);
@@ -184,7 +186,12 @@ static ALCenum android_open_playback(ALCdevice *device, const ALCchar *deviceNam
     data = (AndroidData*)calloc(1, sizeof(*data));
     device->szDeviceName = strdup(deviceName);
     device->ExtraData = data;
-    
+
+#ifdef HAVE_ANDROID_LOW_LATENCY
+    device->Frequency = 22050;
+    device->NumUpdates = 1;
+#endif
+
     return ALC_NO_ERROR;
 }
 
@@ -202,10 +209,7 @@ static ALCboolean android_reset_playback(ALCdevice *device)
 {
     AndroidData* data = (AndroidData*)device->ExtraData;
 
-    device->Frequency = 22050;
-    device->NumUpdates = 2;
-    device->FmtChans = ChannelsFromDevFmt(device->FmtChans) > 1 ? ALC_STEREO_SOFT : ALC_MONO_SOFT;
-    device->FmtType = BytesFromDevFmt(device->FmtType) > 1 ? ALC_SHORT_SOFT : ALC_UNSIGNED_BYTE_SOFT;
+    device->FmtChans = ChannelsFromDevFmt(device->FmtChans) >= 2 ? DevFmtStereo : DevFmtMono;
 
     SetDefaultChannelOrder(device);
 
@@ -226,60 +230,23 @@ static void android_stop_playback(ALCdevice *device)
     }
 }
 
-static ALCenum android_open_capture(ALCdevice *pDevice, const ALCchar *deviceName)
-{
-    (void)pDevice;
-    (void)deviceName;
-    
-    return ALC_INVALID_DEVICE;
-}
-
-static void android_close_capture(ALCdevice *pDevice)
-{
-    (void)pDevice;
-}
-
-static void android_start_capture(ALCdevice *pDevice)
-{
-    (void)pDevice;
-}
-
-static void android_stop_capture(ALCdevice *pDevice)
-{
-    (void)pDevice;
-}
-
-static ALCenum android_capture_samples(ALCdevice *pDevice, ALCvoid *pBuffer, ALCuint lSamples)
-{
-    (void)pDevice;
-    (void)pBuffer;
-    (void)lSamples;
-    
-    return ALC_INVALID_DEVICE;
-}
-
-static ALCuint android_available_samples(ALCdevice *pDevice)
-{
-    (void)pDevice;
-    return 0;
-}
-
 static const BackendFuncs android_funcs = {
     android_open_playback,
     android_close_playback,
     android_reset_playback,
     android_stop_playback,
-    android_open_capture,
-    android_close_capture,
-    android_start_capture,
-    android_stop_capture,
-    android_capture_samples,
-    android_available_samples
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL
 };
 
-void alc_android_init(BackendFuncs *func_list)
+ALCboolean alc_android_init(BackendFuncs *func_list)
 {
     *func_list = android_funcs;
+    return ALC_TRUE;
 }
 
 void alc_android_deinit(void)
@@ -292,12 +259,15 @@ void alc_android_deinit(void)
 
 void alc_android_probe(int type)
 {
-    if (type == DEVICE_PROBE)
+    switch(type)
     {
-        AppendDeviceList(android_device);
-    }
-    else if (type == ALL_DEVICE_PROBE)
-    {
-        AppendAllDeviceList(android_device);
+        case DEVICE_PROBE:
+            AppendDeviceList(android_device);
+            break;
+        case ALL_DEVICE_PROBE:
+            AppendAllDeviceList(android_device);
+            break;
+        case CAPTURE_DEVICE_PROBE:
+            break;
     }
 }

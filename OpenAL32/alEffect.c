@@ -36,6 +36,8 @@ ALboolean DisabledEffects[MAX_EFFECTS];
 
 static void InitEffectParams(ALeffect *effect, ALenum type);
 
+#define LookupEffect(m, k) ((ALeffect*)LookupUIntMapKey(&(m), (k)))
+#define RemoveEffect(m, k) ((ALeffect*)PopUIntMapValue(&(m), (k)))
 
 AL_API ALvoid AL_APIENTRY alGenEffects(ALsizei n, ALuint *effects)
 {
@@ -55,13 +57,13 @@ AL_API ALvoid AL_APIENTRY alGenEffects(ALsizei n, ALuint *effects)
         for(i = 0;i < n;i++)
         {
             ALeffect *effect = calloc(1, sizeof(ALeffect));
-            if(!effect || InitEffect(effect) != AL_NO_ERROR)
+            if(!effect)
             {
-                free(effect);
                 alSetError(Context, AL_OUT_OF_MEMORY);
                 alDeleteEffects(i, effects);
                 break;
             }
+            InitEffectParams(effect, AL_EFFECT_NULL);
 
             err = NewThunkEntry(&effect->effect);
             if(err == AL_NO_ERROR)
@@ -84,7 +86,7 @@ AL_API ALvoid AL_APIENTRY alGenEffects(ALsizei n, ALuint *effects)
     ALCcontext_DecRef(Context);
 }
 
-AL_API ALvoid AL_APIENTRY alDeleteEffects(ALsizei n, const ALuint *effects)
+AL_API ALvoid AL_APIENTRY alDeleteEffects(ALsizei n, ALuint *effects)
 {
     ALCcontext *Context;
     ALCdevice *device;
@@ -105,7 +107,7 @@ AL_API ALvoid AL_APIENTRY alDeleteEffects(ALsizei n, const ALuint *effects)
             if(!effects[i])
                 continue;
 
-            if(LookupEffect(device, effects[i]) == NULL)
+            if(LookupEffect(device->EffectMap, effects[i]) == NULL)
             {
                 alSetError(Context, AL_INVALID_NAME);
                 n = 0;
@@ -116,7 +118,7 @@ AL_API ALvoid AL_APIENTRY alDeleteEffects(ALsizei n, const ALuint *effects)
         for(i = 0;i < n;i++)
         {
             // Recheck that the effect is valid, because there could be duplicated names
-            if((ALEffect=RemoveEffect(device, effects[i])) == NULL)
+            if((ALEffect=RemoveEffect(device->EffectMap, effects[i])) == NULL)
                 continue;
             FreeThunkEntry(ALEffect->effect);
 
@@ -136,7 +138,7 @@ AL_API ALboolean AL_APIENTRY alIsEffect(ALuint effect)
     Context = GetContextRef();
     if(!Context) return AL_FALSE;
 
-    result = ((!effect || LookupEffect(Context->Device, effect)) ?
+    result = ((!effect || LookupEffect(Context->Device->EffectMap, effect)) ?
               AL_TRUE : AL_FALSE);
 
     ALCcontext_DecRef(Context);
@@ -154,7 +156,7 @@ AL_API ALvoid AL_APIENTRY alEffecti(ALuint effect, ALenum param, ALint iValue)
     if(!Context) return;
 
     Device = Context->Device;
-    if((ALEffect=LookupEffect(Device, effect)) != NULL)
+    if((ALEffect=LookupEffect(Device->EffectMap, effect)) != NULL)
     {
         if(param == AL_EFFECT_TYPE)
         {
@@ -184,7 +186,7 @@ AL_API ALvoid AL_APIENTRY alEffecti(ALuint effect, ALenum param, ALint iValue)
     ALCcontext_DecRef(Context);
 }
 
-AL_API ALvoid AL_APIENTRY alEffectiv(ALuint effect, ALenum param, const ALint *piValues)
+AL_API ALvoid AL_APIENTRY alEffectiv(ALuint effect, ALenum param, ALint *piValues)
 {
     ALCcontext *Context;
     ALCdevice  *Device;
@@ -194,7 +196,7 @@ AL_API ALvoid AL_APIENTRY alEffectiv(ALuint effect, ALenum param, const ALint *p
     if(!Context) return;
 
     Device = Context->Device;
-    if((ALEffect=LookupEffect(Device, effect)) != NULL)
+    if((ALEffect=LookupEffect(Device->EffectMap, effect)) != NULL)
     {
         /* Call the appropriate handler */
         ALeffect_SetParamiv(ALEffect, Context, param, piValues);
@@ -215,7 +217,7 @@ AL_API ALvoid AL_APIENTRY alEffectf(ALuint effect, ALenum param, ALfloat flValue
     if(!Context) return;
 
     Device = Context->Device;
-    if((ALEffect=LookupEffect(Device, effect)) != NULL)
+    if((ALEffect=LookupEffect(Device->EffectMap, effect)) != NULL)
     {
         /* Call the appropriate handler */
         ALeffect_SetParamf(ALEffect, Context, param, flValue);
@@ -226,7 +228,7 @@ AL_API ALvoid AL_APIENTRY alEffectf(ALuint effect, ALenum param, ALfloat flValue
     ALCcontext_DecRef(Context);
 }
 
-AL_API ALvoid AL_APIENTRY alEffectfv(ALuint effect, ALenum param, const ALfloat *pflValues)
+AL_API ALvoid AL_APIENTRY alEffectfv(ALuint effect, ALenum param, ALfloat *pflValues)
 {
     ALCcontext *Context;
     ALCdevice  *Device;
@@ -236,7 +238,7 @@ AL_API ALvoid AL_APIENTRY alEffectfv(ALuint effect, ALenum param, const ALfloat 
     if(!Context) return;
 
     Device = Context->Device;
-    if((ALEffect=LookupEffect(Device, effect)) != NULL)
+    if((ALEffect=LookupEffect(Device->EffectMap, effect)) != NULL)
     {
         /* Call the appropriate handler */
         ALeffect_SetParamfv(ALEffect, Context, param, pflValues);
@@ -257,7 +259,7 @@ AL_API ALvoid AL_APIENTRY alGetEffecti(ALuint effect, ALenum param, ALint *piVal
     if(!Context) return;
 
     Device = Context->Device;
-    if((ALEffect=LookupEffect(Device, effect)) != NULL)
+    if((ALEffect=LookupEffect(Device->EffectMap, effect)) != NULL)
     {
         if(param == AL_EFFECT_TYPE)
         {
@@ -285,7 +287,7 @@ AL_API ALvoid AL_APIENTRY alGetEffectiv(ALuint effect, ALenum param, ALint *piVa
     if(!Context) return;
 
     Device = Context->Device;
-    if((ALEffect=LookupEffect(Device, effect)) != NULL)
+    if((ALEffect=LookupEffect(Device->EffectMap, effect)) != NULL)
     {
         /* Call the appropriate handler */
         ALeffect_GetParamiv(ALEffect, Context, param, piValues);
@@ -306,7 +308,7 @@ AL_API ALvoid AL_APIENTRY alGetEffectf(ALuint effect, ALenum param, ALfloat *pfl
     if(!Context) return;
 
     Device = Context->Device;
-    if((ALEffect=LookupEffect(Device, effect)) != NULL)
+    if((ALEffect=LookupEffect(Device->EffectMap, effect)) != NULL)
     {
         /* Call the appropriate handler */
         ALeffect_GetParamf(ALEffect, Context, param, pflValue);
@@ -327,7 +329,7 @@ AL_API ALvoid AL_APIENTRY alGetEffectfv(ALuint effect, ALenum param, ALfloat *pf
     if(!Context) return;
 
     Device = Context->Device;
-    if((ALEffect=LookupEffect(Device, effect)) != NULL)
+    if((ALEffect=LookupEffect(Device->EffectMap, effect)) != NULL)
     {
         /* Call the appropriate handler */
         ALeffect_GetParamfv(ALEffect, Context, param, pflValues);
@@ -1001,6 +1003,43 @@ static void echo_GetParamfv(ALeffect *effect, ALCcontext *context, ALenum param,
 }
 
 
+static void mod_SetParami(ALeffect *effect, ALCcontext *context, ALenum param, ALint val)
+{
+    switch(param)
+    {
+        case AL_RING_MODULATOR_FREQUENCY:
+            if(val >= AL_RING_MODULATOR_MIN_FREQUENCY &&
+               val <= AL_RING_MODULATOR_MAX_FREQUENCY)
+                effect->Modulator.Frequency = val;
+            else
+                alSetError(context, AL_INVALID_VALUE);
+            break;
+
+        case AL_RING_MODULATOR_HIGHPASS_CUTOFF:
+            if(val >= AL_RING_MODULATOR_MIN_HIGHPASS_CUTOFF &&
+               val <= AL_RING_MODULATOR_MAX_HIGHPASS_CUTOFF)
+                effect->Modulator.HighPassCutoff = val;
+            else
+                alSetError(context, AL_INVALID_VALUE);
+            break;
+
+        case AL_RING_MODULATOR_WAVEFORM:
+            if(val >= AL_RING_MODULATOR_MIN_WAVEFORM &&
+               val <= AL_RING_MODULATOR_MAX_WAVEFORM)
+                effect->Modulator.Waveform = val;
+            else
+                alSetError(context, AL_INVALID_VALUE);
+            break;
+
+        default:
+            alSetError(context, AL_INVALID_ENUM);
+            break;
+    }
+}
+static void mod_SetParamiv(ALeffect *effect, ALCcontext *context, ALenum param, const ALint *vals)
+{
+    mod_SetParami(effect, context, param, vals[0]);
+}
 static void mod_SetParamf(ALeffect *effect, ALCcontext *context, ALenum param, ALfloat val)
 {
     switch(param)
@@ -1029,32 +1068,6 @@ static void mod_SetParamf(ALeffect *effect, ALCcontext *context, ALenum param, A
 static void mod_SetParamfv(ALeffect *effect, ALCcontext *context, ALenum param, const ALfloat *vals)
 {
     mod_SetParamf(effect, context, param, vals[0]);
-}
-static void mod_SetParami(ALeffect *effect, ALCcontext *context, ALenum param, ALint val)
-{
-    switch(param)
-    {
-        case AL_RING_MODULATOR_FREQUENCY:
-        case AL_RING_MODULATOR_HIGHPASS_CUTOFF:
-            mod_SetParamf(effect, context, param, (ALfloat)val);
-            break;
-
-        case AL_RING_MODULATOR_WAVEFORM:
-            if(val >= AL_RING_MODULATOR_MIN_WAVEFORM &&
-               val <= AL_RING_MODULATOR_MAX_WAVEFORM)
-                effect->Modulator.Waveform = val;
-            else
-                alSetError(context, AL_INVALID_VALUE);
-            break;
-
-        default:
-            alSetError(context, AL_INVALID_ENUM);
-            break;
-    }
-}
-static void mod_SetParamiv(ALeffect *effect, ALCcontext *context, ALenum param, const ALint *vals)
-{
-    mod_SetParami(effect, context, param, vals[0]);
 }
 
 static void mod_GetParami(ALeffect *effect, ALCcontext *context, ALenum param, ALint *val)
@@ -1172,12 +1185,6 @@ static void null_GetParamf(ALeffect *effect, ALCcontext *context, ALenum param, 
 static void null_GetParamfv(ALeffect *effect, ALCcontext *context, ALenum param, ALfloat *vals)
 { (void)effect;(void)param;(void)vals; alSetError(context, AL_INVALID_ENUM); }
 
-
-ALenum InitEffect(ALeffect *effect)
-{
-    InitEffectParams(effect, AL_EFFECT_NULL);
-    return AL_NO_ERROR;
-}
 
 ALvoid ReleaseALEffects(ALCdevice *device)
 {
@@ -1311,194 +1318,4 @@ static void InitEffectParams(ALeffect *effect, ALenum type)
         break;
     }
     effect->type = type;
-}
-
-
-#include "AL/efx-presets.h"
-
-#define DECL(x) { #x, EFX_REVERB_PRESET_##x }
-static const struct {
-    const char name[32];
-    EFXEAXREVERBPROPERTIES props;
-} reverblist[] = {
-    DECL(GENERIC),
-    DECL(PADDEDCELL),
-    DECL(ROOM),
-    DECL(BATHROOM),
-    DECL(LIVINGROOM),
-    DECL(STONEROOM),
-    DECL(AUDITORIUM),
-    DECL(CONCERTHALL),
-    DECL(CAVE),
-    DECL(ARENA),
-    DECL(HANGAR),
-    DECL(CARPETTEDHALLWAY),
-    DECL(HALLWAY),
-    DECL(STONECORRIDOR),
-    DECL(ALLEY),
-    DECL(FOREST),
-    DECL(CITY),
-    DECL(MOUNTAINS),
-    DECL(QUARRY),
-    DECL(PLAIN),
-    DECL(PARKINGLOT),
-    DECL(SEWERPIPE),
-    DECL(UNDERWATER),
-    DECL(DRUGGED),
-    DECL(DIZZY),
-    DECL(PSYCHOTIC),
-
-    DECL(CASTLE_SMALLROOM),
-    DECL(CASTLE_SHORTPASSAGE),
-    DECL(CASTLE_MEDIUMROOM),
-    DECL(CASTLE_LARGEROOM),
-    DECL(CASTLE_LONGPASSAGE),
-    DECL(CASTLE_HALL),
-    DECL(CASTLE_CUPBOARD),
-    DECL(CASTLE_COURTYARD),
-    DECL(CASTLE_ALCOVE),
-
-    DECL(FACTORY_SMALLROOM),
-    DECL(FACTORY_SHORTPASSAGE),
-    DECL(FACTORY_MEDIUMROOM),
-    DECL(FACTORY_LARGEROOM),
-    DECL(FACTORY_LONGPASSAGE),
-    DECL(FACTORY_HALL),
-    DECL(FACTORY_CUPBOARD),
-    DECL(FACTORY_COURTYARD),
-    DECL(FACTORY_ALCOVE),
-
-    DECL(ICEPALACE_SMALLROOM),
-    DECL(ICEPALACE_SHORTPASSAGE),
-    DECL(ICEPALACE_MEDIUMROOM),
-    DECL(ICEPALACE_LARGEROOM),
-    DECL(ICEPALACE_LONGPASSAGE),
-    DECL(ICEPALACE_HALL),
-    DECL(ICEPALACE_CUPBOARD),
-    DECL(ICEPALACE_COURTYARD),
-    DECL(ICEPALACE_ALCOVE),
-
-    DECL(SPACESTATION_SMALLROOM),
-    DECL(SPACESTATION_SHORTPASSAGE),
-    DECL(SPACESTATION_MEDIUMROOM),
-    DECL(SPACESTATION_LARGEROOM),
-    DECL(SPACESTATION_LONGPASSAGE),
-    DECL(SPACESTATION_HALL),
-    DECL(SPACESTATION_CUPBOARD),
-    DECL(SPACESTATION_ALCOVE),
-
-    DECL(WOODEN_SMALLROOM),
-    DECL(WOODEN_SHORTPASSAGE),
-    DECL(WOODEN_MEDIUMROOM),
-    DECL(WOODEN_LARGEROOM),
-    DECL(WOODEN_LONGPASSAGE),
-    DECL(WOODEN_HALL),
-    DECL(WOODEN_CUPBOARD),
-    DECL(WOODEN_COURTYARD),
-    DECL(WOODEN_ALCOVE),
-
-    DECL(SPORT_EMPTYSTADIUM),
-    DECL(SPORT_SQUASHCOURT),
-    DECL(SPORT_SMALLSWIMMINGPOOL),
-    DECL(SPORT_LARGESWIMMINGPOOL),
-    DECL(SPORT_GYMNASIUM),
-    DECL(SPORT_FULLSTADIUM),
-    DECL(SPORT_STADIUMTANNOY),
-
-    DECL(PREFAB_WORKSHOP),
-    DECL(PREFAB_SCHOOLROOM),
-    DECL(PREFAB_PRACTISEROOM),
-    DECL(PREFAB_OUTHOUSE),
-    DECL(PREFAB_CARAVAN),
-
-    DECL(DOME_TOMB),
-    DECL(PIPE_SMALL),
-    DECL(DOME_SAINTPAULS),
-    DECL(PIPE_LONGTHIN),
-    DECL(PIPE_LARGE),
-    DECL(PIPE_RESONANT),
-
-    DECL(OUTDOORS_BACKYARD),
-    DECL(OUTDOORS_ROLLINGPLAINS),
-    DECL(OUTDOORS_DEEPCANYON),
-    DECL(OUTDOORS_CREEK),
-    DECL(OUTDOORS_VALLEY),
-
-    DECL(MOOD_HEAVEN),
-    DECL(MOOD_HELL),
-    DECL(MOOD_MEMORY),
-
-    DECL(DRIVING_COMMENTATOR),
-    DECL(DRIVING_PITGARAGE),
-    DECL(DRIVING_INCAR_RACER),
-    DECL(DRIVING_INCAR_SPORTS),
-    DECL(DRIVING_INCAR_LUXURY),
-    DECL(DRIVING_FULLGRANDSTAND),
-    DECL(DRIVING_EMPTYGRANDSTAND),
-    DECL(DRIVING_TUNNEL),
-
-    DECL(CITY_STREETS),
-    DECL(CITY_SUBWAY),
-    DECL(CITY_MUSEUM),
-    DECL(CITY_LIBRARY),
-    DECL(CITY_UNDERPASS),
-    DECL(CITY_ABANDONED),
-
-    DECL(DUSTYROOM),
-    DECL(CHAPEL),
-    DECL(SMALLWATERROOM),
-};
-#undef DECL
-static const ALsizei reverblistsize = sizeof(reverblist)/sizeof(reverblist[0]);
-
-ALvoid GetReverbEffect(const char *name, ALeffect *effect)
-{
-    int i;
-
-    if(!DisabledEffects[EAXREVERB])
-        InitEffectParams(effect, AL_EFFECT_EAXREVERB);
-    else if(!DisabledEffects[REVERB])
-        InitEffectParams(effect, AL_EFFECT_REVERB);
-    else
-        InitEffectParams(effect, AL_EFFECT_NULL);
-    for(i = 0;i < reverblistsize;i++)
-    {
-        const EFXEAXREVERBPROPERTIES *props;
-
-        if(strcasecmp(name, reverblist[i].name) != 0)
-            continue;
-
-        TRACE("Loading reverb '%s'\n", reverblist[i].name);
-        props = &reverblist[i].props;
-        effect->Reverb.Density   = props->flDensity;
-        effect->Reverb.Diffusion = props->flDiffusion;
-        effect->Reverb.Gain   = props->flGain;
-        effect->Reverb.GainHF = props->flGainHF;
-        effect->Reverb.GainLF = props->flGainLF;
-        effect->Reverb.DecayTime    = props->flDecayTime;
-        effect->Reverb.DecayHFRatio = props->flDecayHFRatio;
-        effect->Reverb.DecayLFRatio = props->flDecayLFRatio;
-        effect->Reverb.ReflectionsGain   = props->flReflectionsGain;
-        effect->Reverb.ReflectionsDelay  = props->flReflectionsDelay;
-        effect->Reverb.ReflectionsPan[0] = props->flReflectionsPan[0];
-        effect->Reverb.ReflectionsPan[1] = props->flReflectionsPan[1];
-        effect->Reverb.ReflectionsPan[2] = props->flReflectionsPan[2];
-        effect->Reverb.LateReverbGain   = props->flLateReverbGain;
-        effect->Reverb.LateReverbDelay  = props->flLateReverbDelay;
-        effect->Reverb.LateReverbPan[0] = props->flLateReverbPan[0];
-        effect->Reverb.LateReverbPan[1] = props->flLateReverbPan[1];
-        effect->Reverb.LateReverbPan[2] = props->flLateReverbPan[2];
-        effect->Reverb.EchoTime  = props->flEchoTime;
-        effect->Reverb.EchoDepth = props->flEchoDepth;
-        effect->Reverb.ModulationTime  = props->flModulationTime;
-        effect->Reverb.ModulationDepth = props->flModulationDepth;
-        effect->Reverb.AirAbsorptionGainHF = props->flAirAbsorptionGainHF;
-        effect->Reverb.HFReference = props->flHFReference;
-        effect->Reverb.LFReference = props->flLFReference;
-        effect->Reverb.RoomRolloffFactor = props->flRoomRolloffFactor;
-        effect->Reverb.DecayHFLimit = props->iDecayHFLimit;
-        break;
-    }
-    if(i == reverblistsize)
-        WARN("Reverb preset '%s' not found\n", name);
 }

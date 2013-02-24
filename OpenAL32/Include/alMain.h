@@ -9,10 +9,6 @@
 #include <fenv.h>
 #endif
 
-#ifdef HAVE_FPU_CONTROL_H
-#include <fpu_control.h>
-#endif
-
 #include "AL/al.h"
 #include "AL/alc.h"
 #include "AL/alext.h"
@@ -23,21 +19,21 @@
 #define ALC_FORMAT_TYPE_SOFT                     0x1991
 
 /* Sample types */
-#define ALC_BYTE_SOFT                            0x1400
-#define ALC_UNSIGNED_BYTE_SOFT                   0x1401
-#define ALC_SHORT_SOFT                           0x1402
-#define ALC_UNSIGNED_SHORT_SOFT                  0x1403
-#define ALC_INT_SOFT                             0x1404
-#define ALC_UNSIGNED_INT_SOFT                    0x1405
-#define ALC_FLOAT_SOFT                           0x1406
+#define ALC_BYTE                                 0x1400
+#define ALC_UNSIGNED_BYTE                        0x1401
+#define ALC_SHORT                                0x1402
+#define ALC_UNSIGNED_SHORT                       0x1403
+#define ALC_INT                                  0x1404
+#define ALC_UNSIGNED_INT                         0x1405
+#define ALC_FLOAT                                0x1406
 
 /* Channel configurations */
-#define ALC_MONO_SOFT                            0x1500
-#define ALC_STEREO_SOFT                          0x1501
-#define ALC_QUAD_SOFT                            0x1503
-#define ALC_5POINT1_SOFT                         0x1504 /* (WFX order) */
-#define ALC_6POINT1_SOFT                         0x1505 /* (WFX order) */
-#define ALC_7POINT1_SOFT                         0x1506 /* (WFX order) */
+#define ALC_MONO                                 0x1500
+#define ALC_STEREO                               0x1501
+#define ALC_QUAD                                 0x1503
+#define ALC_5POINT1                              0x1504 /* (WFX order) */
+#define ALC_6POINT1                              0x1505 /* (WFX order) */
+#define ALC_7POINT1                              0x1506 /* (WFX order) */
 
 typedef ALCdevice* (ALC_APIENTRY*LPALCLOOPBACKOPENDEVICESOFT)(void);
 typedef ALCboolean (ALC_APIENTRY*LPALCISRENDERFORMATSUPPORTEDSOFT)(ALCdevice *device, ALCsizei freq, ALCenum channels, ALCenum type);
@@ -46,6 +42,72 @@ typedef void (ALC_APIENTRY*LPALCRENDERSAMPLESSOFT)(ALCdevice *device, ALCvoid *b
 ALC_API ALCdevice* ALC_APIENTRY alcLoopbackOpenDeviceSOFT(void);
 ALC_API ALCboolean ALC_APIENTRY alcIsRenderFormatSupportedSOFT(ALCdevice *device, ALCsizei freq, ALCenum channels, ALCenum type);
 ALC_API void ALC_APIENTRY alcRenderSamplesSOFT(ALCdevice *device, ALCvoid *buffer, ALCsizei samples);
+#endif
+#endif
+
+#ifndef AL_SOFT_buffer_samples
+#define AL_SOFT_buffer_samples 1
+/* Sample types */
+#define AL_BYTE                                  0x1400
+#define AL_UNSIGNED_BYTE                         0x1401
+#define AL_SHORT                                 0x1402
+#define AL_UNSIGNED_SHORT                        0x1403
+#define AL_INT                                   0x1404
+#define AL_UNSIGNED_INT                          0x1405
+#define AL_FLOAT                                 0x1406
+#define AL_DOUBLE                                0x1407
+#define AL_BYTE3                                 0x1408
+#define AL_UNSIGNED_BYTE3                        0x1409
+#define AL_MULAW                                 0x1410
+#define AL_IMA4                                  0x1411
+
+/* Channel configurations */
+#define AL_MONO                                  0x1500
+#define AL_STEREO                                0x1501
+#define AL_REAR                                  0x1502
+#define AL_QUAD                                  0x1503
+#define AL_5POINT1                               0x1504 /* (WFX order) */
+#define AL_6POINT1                               0x1505 /* (WFX order) */
+#define AL_7POINT1                               0x1506 /* (WFX order) */
+
+/* Storage formats */
+#define AL_MONO8                                 0x1100
+#define AL_MONO16                                0x1101
+#define AL_MONO32F                               0x10010
+#define AL_STEREO8                               0x1102
+#define AL_STEREO16                              0x1103
+#define AL_STEREO32F                             0x10011
+#define AL_QUAD8                                 0x1204
+#define AL_QUAD16                                0x1205
+#define AL_QUAD32F                               0x1206
+#define AL_REAR8                                 0x1207
+#define AL_REAR16                                0x1208
+#define AL_REAR32F                               0x1209
+#define AL_5POINT1_8                             0x120A
+#define AL_5POINT1_16                            0x120B
+#define AL_5POINT1_32F                           0x120C
+#define AL_6POINT1_8                             0x120D
+#define AL_6POINT1_16                            0x120E
+#define AL_6POINT1_32F                           0x120F
+#define AL_7POINT1_8                             0x1210
+#define AL_7POINT1_16                            0x1211
+#define AL_7POINT1_32F                           0x1212
+
+typedef void (AL_APIENTRY*LPALBUFFERSAMPLESSOFT)(ALuint,ALuint,ALenum,ALsizei,ALenum,ALenum,const ALvoid*);
+typedef void (AL_APIENTRY*LPALBUFFERSUBSAMPLESSOFT)(ALuint,ALsizei,ALsizei,ALenum,ALenum,const ALvoid*);
+typedef void (AL_APIENTRY*LPALGETBUFFERSAMPLESSOFT)(ALuint,ALsizei,ALsizei,ALenum,ALenum,ALvoid*);
+typedef ALboolean (AL_APIENTRY*LPALISBUFFERFORMATSUPPORTEDSOFT)(ALenum);
+#ifdef AL_ALEXT_PROTOTYPES
+AL_API void AL_APIENTRY alBufferSamplesSOFT(ALuint buffer,
+    ALuint samplerate, ALenum internalformat, ALsizei frames,
+    ALenum channels, ALenum type, const ALvoid *data);
+AL_API void AL_APIENTRY alBufferSubSamplesSOFT(ALuint buffer,
+    ALsizei offset, ALsizei frames,
+    ALenum channels, ALenum type, const ALvoid *data);
+AL_API void AL_APIENTRY alGetBufferSamplesSOFT(ALuint buffer,
+    ALsizei offset, ALsizei frames,
+    ALenum channels, ALenum type, ALvoid *data);
+AL_API ALboolean AL_APIENTRY alIsBufferFormatSupportedSOFT(ALenum format);
 #endif
 #endif
 
@@ -153,8 +215,6 @@ void *GetSymbol(void *handle, const char *name);
 
 #endif
 
-typedef void *volatile XchgPtr;
-
 #if defined(__GNUC__) && (__GNUC__ > 4 || (__GNUC__ == 4 && __GNUC_MINOR__ >= 1))
 typedef ALuint RefCount;
 static __inline RefCount IncrementRef(volatile RefCount *ptr)
@@ -166,7 +226,7 @@ static __inline int ExchangeInt(volatile int *ptr, int newval)
 {
     return __sync_lock_test_and_set(ptr, newval);
 }
-static __inline void *ExchangePtr(XchgPtr *ptr, void *newval)
+static __inline void *ExchangePtr(void *volatile*ptr, void *newval)
 {
     return __sync_lock_test_and_set(ptr, newval);
 }
@@ -174,79 +234,9 @@ static __inline ALboolean CompExchangeInt(volatile int *ptr, int oldval, int new
 {
     return __sync_bool_compare_and_swap(ptr, oldval, newval);
 }
-static __inline ALboolean CompExchangePtr(XchgPtr *ptr, void *oldval, void *newval)
+static __inline ALboolean CompExchangePtr(void *volatile*ptr, void *oldval, void *newval)
 {
     return __sync_bool_compare_and_swap(ptr, oldval, newval);
-}
-
-#elif defined(__GNUC__) && (defined(__i386__) || defined(__x86_64__))
-
-static __inline int xaddl(volatile int *dest, int incr)
-{
-    int ret;
-    __asm__ __volatile__("lock; xaddl %0,(%1)"
-                         : "=r" (ret)
-                         : "r" (dest), "0" (incr)
-                         : "memory");
-    return ret;
-}
-
-typedef int RefCount;
-static __inline RefCount IncrementRef(volatile RefCount *ptr)
-{ return xaddl(ptr, 1)+1; }
-static __inline RefCount DecrementRef(volatile RefCount *ptr)
-{ return xaddl(ptr, -1)-1; }
-
-static __inline int ExchangeInt(volatile int *dest, int newval)
-{
-    int ret;
-    __asm__ __volatile__("lock; xchgl %0,(%1)"
-                         : "=r" (ret)
-                         : "r" (dest), "0" (newval)
-                         : "memory");
-    return ret;
-}
-
-static __inline ALboolean CompExchangeInt(volatile int *dest, int oldval, int newval)
-{
-    int ret;
-    __asm__ __volatile__("lock; cmpxchgl %2,(%1)"
-                         : "=a" (ret)
-                         : "r" (dest), "r" (newval), "0" (oldval)
-                         : "memory");
-    return ret == oldval;
-}
-
-static __inline void *ExchangePtr(XchgPtr *dest, void *newval)
-{
-    void *ret;
-    __asm__ __volatile__(
-#ifdef __i386__
-                         "lock; xchgl %0,(%1)"
-#else
-                         "lock; xchgq %0,(%1)"
-#endif
-                         : "=r" (ret)
-                         : "r" (dest), "0" (newval)
-                         : "memory"
-    );
-    return ret;
-}
-
-static __inline ALboolean CompExchangePtr(XchgPtr *dest, void *oldval, void *newval)
-{
-    void *ret;
-    __asm__ __volatile__(
-#ifdef __i386__
-                         "lock; cmpxchgl %2,(%1)"
-#else
-                         "lock; cmpxchgq %2,(%1)"
-#endif
-                         : "=a" (ret)
-                         : "r" (dest), "r" (newval), "0" (oldval)
-                         : "memory"
-    );
-    return ret == oldval;
 }
 
 #elif defined(_WIN32)
@@ -267,7 +257,7 @@ static __inline int ExchangeInt(volatile int *ptr, int newval)
     } u = { ptr };
     return InterlockedExchange(u.l, newval);
 }
-static __inline void *ExchangePtr(XchgPtr *ptr, void *newval)
+static __inline void *ExchangePtr(void *volatile*ptr, void *newval)
 {
     return InterlockedExchangePointer(ptr, newval);
 }
@@ -279,7 +269,7 @@ static __inline ALboolean CompExchangeInt(volatile int *ptr, int oldval, int new
     } u = { ptr };
     return InterlockedCompareExchange(u.l, newval, oldval) == oldval;
 }
-static __inline ALboolean CompExchangePtr(XchgPtr *ptr, void *oldval, void *newval)
+static __inline ALboolean CompExchangePtr(void *volatile*ptr, void *oldval, void *newval)
 {
     return InterlockedCompareExchangePointer(ptr, newval, oldval) == oldval;
 }
@@ -303,7 +293,7 @@ static __inline int ExchangeInt(volatile int *ptr, int newval)
     } while(!OSAtomicCompareAndSwap32Barrier(oldval, newval, ptr));
     return oldval;
 }
-static __inline void *ExchangePtr(XchgPtr *ptr, void *newval)
+static __inline void *ExchangePtr(void *volatile*ptr, void *newval)
 {
     void *oldval;
     do {
@@ -315,7 +305,7 @@ static __inline ALboolean CompExchangeInt(volatile int *ptr, int oldval, int new
 {
     return OSAtomicCompareAndSwap32Barrier(oldval, newval, ptr);
 }
-static __inline ALboolean CompExchangePtr(XchgPtr *ptr, void *oldval, void *newval)
+static __inline ALboolean CompExchangePtr(void *volatile*ptr, void *oldval, void *newval)
 {
     return OSAtomicCompareAndSwapPtrBarrier(oldval, newval, ptr);
 }
@@ -356,8 +346,9 @@ extern UIntMap TlsDestructor;
 void InitUIntMap(UIntMap *map, ALsizei limit);
 void ResetUIntMap(UIntMap *map);
 ALenum InsertUIntMapEntry(UIntMap *map, ALuint key, ALvoid *value);
-ALvoid *RemoveUIntMapKey(UIntMap *map, ALuint key);
+void RemoveUIntMapKey(UIntMap *map, ALuint key);
 ALvoid *LookupUIntMapKey(UIntMap *map, ALuint key);
+ALvoid *PopUIntMapValue(UIntMap *map, ALuint key);
 
 static __inline void LockUIntMapRead(UIntMap *map)
 { ReadLock(&map->lock); }
@@ -379,9 +370,9 @@ extern "C" {
 #define DEFAULT_OUTPUT_RATE        (44100)
 
 #define SPEEDOFSOUNDMETRESPERSEC   (343.3f)
-#define AIRABSORBGAINHF            (0.99426f) /* -0.05dB */
+#define AIRABSORBGAINHF            (0.99426) /* -0.05dB */
 
-#define LOWPASSFREQREF             (5000)
+#define LOWPASSFREQCUTOFF          (5000)
 
 
 struct Hrtf;
@@ -403,30 +394,6 @@ static __inline ALuint NextPowerOf2(ALuint value)
     }
     return powerOf2;
 }
-
-/* Fast float-to-int conversion. Assumes the FPU is already in round-to-zero
- * mode. */
-static __inline ALint fastf2i(ALfloat f)
-{
-    ALint i;
-#if defined(_MSC_VER) && !defined(_WIN64)
-    __asm fld f
-    __asm fistp i
-#elif defined(__GNUC__) && defined(__i386__)
-    __asm__ __volatile__("flds %1\n\t"
-                         "fistpl %0\n\t"
-                         : "=m" (i)
-                         : "m" (f));
-#else
-    i = (ALint)f;
-#endif
-    return i;
-}
-
-/* Fast float-to-uint conversion. Assumes the FPU is already in round-to-zero
- * mode. */
-static __inline ALuint fastf2u(ALfloat f)
-{ return fastf2i(f); }
 
 
 enum DevProbe {
@@ -493,34 +460,35 @@ void alc_ca_probe(enum DevProbe type);
 ALCboolean alc_opensl_init(BackendFuncs *func_list);
 void alc_opensl_deinit(void);
 void alc_opensl_probe(enum DevProbe type);
+ALCboolean alc_android_init(BackendFuncs *func_list);
+void alc_android_deinit(void);
+void alc_android_probe(int type);
 ALCboolean alc_null_init(BackendFuncs *func_list);
 void alc_null_deinit(void);
 void alc_null_probe(enum DevProbe type);
 ALCboolean alc_loopback_init(BackendFuncs *func_list);
 void alc_loopback_deinit(void);
 void alc_loopback_probe(enum DevProbe type);
-void alc_android_init(BackendFuncs *func_list);
-void alc_android_deinit(void);
-void alc_android_probe(int type);
+
 
 /* Device formats */
 enum DevFmtType {
-    DevFmtByte   = ALC_BYTE_SOFT,
-    DevFmtUByte  = ALC_UNSIGNED_BYTE_SOFT,
-    DevFmtShort  = ALC_SHORT_SOFT,
-    DevFmtUShort = ALC_UNSIGNED_SHORT_SOFT,
-    DevFmtFloat  = ALC_FLOAT_SOFT
+    DevFmtByte   = ALC_BYTE,
+    DevFmtUByte  = ALC_UNSIGNED_BYTE,
+    DevFmtShort  = ALC_SHORT,
+    DevFmtUShort = ALC_UNSIGNED_SHORT,
+    DevFmtFloat  = ALC_FLOAT
 };
 enum DevFmtChannels {
-    DevFmtMono   = ALC_MONO_SOFT,
-    DevFmtStereo = ALC_STEREO_SOFT,
-    DevFmtQuad   = ALC_QUAD_SOFT,
-    DevFmtX51    = ALC_5POINT1_SOFT,
-    DevFmtX61    = ALC_6POINT1_SOFT,
-    DevFmtX71    = ALC_7POINT1_SOFT,
+    DevFmtMono   = ALC_MONO,
+    DevFmtStereo = ALC_STEREO,
+    DevFmtQuad   = ALC_QUAD,
+    DevFmtX51    = ALC_5POINT1,
+    DevFmtX61    = ALC_6POINT1,
+    DevFmtX71    = ALC_7POINT1,
 
     /* Similar to 5.1, except using the side channels instead of back */
-    DevFmtX51Side = 0x80000000 | ALC_5POINT1_SOFT
+    DevFmtX51Side = 0x80000000 | ALC_5POINT1
 };
 
 ALuint BytesFromDevFmt(enum DevFmtType type);
@@ -600,9 +568,6 @@ struct ALCdevice_struct
     ALfloat ClickRemoval[MAXCHANNELS];
     ALfloat PendingClicks[MAXCHANNELS];
 
-    /* Default effect slot */
-    struct ALeffectslot *DefaultSlot;
-
     // Contexts created on this device
     ALCcontext *volatile ContextList;
 
@@ -625,21 +590,15 @@ struct ALCdevice_struct
 
 // Duplicate stereo sources on the side/rear channels
 #define DEVICE_DUPLICATE_STEREO                  (1<<0)
+// Use HRTF filters for mixing sounds
+#define DEVICE_USE_HRTF                          (1<<1)
 // Frequency was requested by the app or config file
-#define DEVICE_FREQUENCY_REQUEST                 (1<<1)
+#define DEVICE_FREQUENCY_REQUEST                 (1<<2)
 // Channel configuration was requested by the config file
-#define DEVICE_CHANNELS_REQUEST                  (1<<2)
+#define DEVICE_CHANNELS_REQUEST                  (1<<3)
 
 // Specifies if the device is currently running
 #define DEVICE_RUNNING                           (1<<31)
-
-#define LookupBuffer(m, k) ((struct ALbuffer*)LookupUIntMapKey(&(m)->BufferMap, (k)))
-#define LookupEffect(m, k) ((struct ALeffect*)LookupUIntMapKey(&(m)->EffectMap, (k)))
-#define LookupFilter(m, k) ((struct ALfilter*)LookupUIntMapKey(&(m)->FilterMap, (k)))
-#define RemoveBuffer(m, k) ((struct ALbuffer*)RemoveUIntMapKey(&(m)->BufferMap, (k)))
-#define RemoveEffect(m, k) ((struct ALeffect*)RemoveUIntMapKey(&(m)->EffectMap, (k)))
-#define RemoveFilter(m, k) ((struct ALfilter*)RemoveUIntMapKey(&(m)->FilterMap, (k)))
-
 
 struct ALCcontext_struct
 {
@@ -676,11 +635,6 @@ struct ALCcontext_struct
     ALCcontext *volatile next;
 };
 
-#define LookupSource(m, k) ((struct ALsource*)LookupUIntMapKey(&(m)->SourceMap, (k)))
-#define LookupEffectSlot(m, k) ((struct ALeffectslot*)LookupUIntMapKey(&(m)->EffectSlotMap, (k)))
-#define RemoveSource(m, k) ((struct ALsource*)RemoveUIntMapKey(&(m)->SourceMap, (k)))
-#define RemoveEffectSlot(m, k) ((struct ALeffectslot*)RemoveUIntMapKey(&(m)->EffectSlotMap, (k)))
-
 ALCcontext *GetContextRef(void);
 
 void ALCcontext_IncRef(ALCcontext *context);
@@ -690,16 +644,10 @@ void AppendDeviceList(const ALCchar *name);
 void AppendAllDeviceList(const ALCchar *name);
 void AppendCaptureDeviceList(const ALCchar *name);
 
-static __inline void LockDevice(ALCdevice *device)
-{ EnterCriticalSection(&device->Mutex); }
-static __inline void UnlockDevice(ALCdevice *device)
-{ LeaveCriticalSection(&device->Mutex); }
-
-static __inline void LockContext(ALCcontext *context)
-{ LockDevice(context->Device); }
-static __inline void UnlockContext(ALCcontext *context)
-{ UnlockDevice(context->Device); }
-
+ALCvoid LockDevice(ALCdevice *device);
+ALCvoid UnlockDevice(ALCdevice *device);
+ALCvoid LockContext(ALCcontext *context);
+ALCvoid UnlockContext(ALCcontext *context);
 
 ALvoid *StartThread(ALuint (*func)(ALvoid*), ALvoid *ptr);
 ALuint StopThread(ALvoid *thread);
@@ -772,6 +720,9 @@ extern enum LogLevel LogLevel;
         AL_PRINT(__VA_ARGS__);                                                \
 } while(0)
 
+
+extern ALdouble ConeScale;
+extern ALdouble ZScale;
 
 extern ALint RTPrioLevel;
 

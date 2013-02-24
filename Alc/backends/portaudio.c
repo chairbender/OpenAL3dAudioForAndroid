@@ -175,9 +175,6 @@ static ALCenum pa_open_playback(ALCdevice *device, const ALCchar *deviceName)
                                  (float)device->Frequency;
     outParams.hostApiSpecificStreamInfo = NULL;
 
-    outParams.channelCount = ((device->FmtChans == DevFmtMono) ? 1 : 2);
-
-retry_open:
     switch(device->FmtType)
     {
         case DevFmtByte:
@@ -196,16 +193,14 @@ retry_open:
             outParams.sampleFormat = paFloat32;
             break;
     }
+    outParams.channelCount = ((device->FmtChans == DevFmtMono) ? 1 : 2);
+
+    SetDefaultChannelOrder(device);
 
     err = Pa_OpenStream(&data->stream, NULL, &outParams, device->Frequency,
                         device->UpdateSize, paNoFlag, pa_callback, device);
     if(err != paNoError)
     {
-        if(device->FmtType == DevFmtFloat)
-        {
-            device->FmtType = DevFmtShort;
-            goto retry_open;
-        }
         ERR("Pa_OpenStream() returned an error: %s\n", Pa_GetErrorText(err));
         device->ExtraData = NULL;
         free(data);
@@ -229,7 +224,6 @@ retry_open:
         device->Flags &= ~DEVICE_CHANNELS_REQUEST;
         device->FmtChans = ((outParams.channelCount==1) ? DevFmtMono : DevFmtStereo);
     }
-    SetDefaultChannelOrder(device);
 
     return ALC_NO_ERROR;
 }
@@ -254,7 +248,13 @@ static ALCboolean pa_reset_playback(ALCdevice *device)
     PaError err;
 
     streamInfo = Pa_GetStreamInfo(data->stream);
-    device->Frequency = streamInfo->sampleRate;
+    if(device->Frequency != streamInfo->sampleRate)
+    {
+        if((device->Flags&DEVICE_FREQUENCY_REQUEST))
+            ERR("PortAudio does not support changing sample rates (wanted %dhz, got %.1fhz)\n", device->Frequency, streamInfo->sampleRate);
+        device->Flags &= ~DEVICE_FREQUENCY_REQUEST;
+        device->Frequency = streamInfo->sampleRate;
+    }
     device->UpdateSize = data->update_size;
 
     err = Pa_StartStream(data->stream);

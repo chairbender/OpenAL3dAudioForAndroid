@@ -32,6 +32,8 @@
 
 static void InitFilterParams(ALfilter *filter, ALenum type);
 
+#define LookupFilter(m, k) ((ALfilter*)LookupUIntMapKey(&(m), (k)))
+#define RemoveFilter(m, k) ((ALfilter*)PopUIntMapValue(&(m), (k)))
 
 AL_API ALvoid AL_APIENTRY alGenFilters(ALsizei n, ALuint *filters)
 {
@@ -80,7 +82,7 @@ AL_API ALvoid AL_APIENTRY alGenFilters(ALsizei n, ALuint *filters)
     ALCcontext_DecRef(Context);
 }
 
-AL_API ALvoid AL_APIENTRY alDeleteFilters(ALsizei n, const ALuint *filters)
+AL_API ALvoid AL_APIENTRY alDeleteFilters(ALsizei n, ALuint *filters)
 {
     ALCcontext *Context;
     ALCdevice *device;
@@ -101,7 +103,7 @@ AL_API ALvoid AL_APIENTRY alDeleteFilters(ALsizei n, const ALuint *filters)
             if(!filters[i])
                 continue;
 
-            if(LookupFilter(device, filters[i]) == NULL)
+            if(LookupFilter(device->FilterMap, filters[i]) == NULL)
             {
                 alSetError(Context, AL_INVALID_NAME);
                 n = 0;
@@ -112,7 +114,7 @@ AL_API ALvoid AL_APIENTRY alDeleteFilters(ALsizei n, const ALuint *filters)
         for(i = 0;i < n;i++)
         {
             // Recheck that the filter is valid, because there could be duplicated names
-            if((ALFilter=RemoveFilter(device, filters[i])) == NULL)
+            if((ALFilter=RemoveFilter(device->FilterMap, filters[i])) == NULL)
                 continue;
             FreeThunkEntry(ALFilter->filter);
 
@@ -132,7 +134,7 @@ AL_API ALboolean AL_APIENTRY alIsFilter(ALuint filter)
     Context = GetContextRef();
     if(!Context) return AL_FALSE;
 
-    result = ((!filter || LookupFilter(Context->Device, filter)) ?
+    result = ((!filter || LookupFilter(Context->Device->FilterMap, filter)) ?
               AL_TRUE : AL_FALSE);
 
     ALCcontext_DecRef(Context);
@@ -150,7 +152,7 @@ AL_API ALvoid AL_APIENTRY alFilteri(ALuint filter, ALenum param, ALint iValue)
     if(!Context) return;
 
     Device = Context->Device;
-    if((ALFilter=LookupFilter(Device, filter)) != NULL)
+    if((ALFilter=LookupFilter(Device->FilterMap, filter)) != NULL)
     {
         switch(param)
         {
@@ -173,7 +175,7 @@ AL_API ALvoid AL_APIENTRY alFilteri(ALuint filter, ALenum param, ALint iValue)
     ALCcontext_DecRef(Context);
 }
 
-AL_API ALvoid AL_APIENTRY alFilteriv(ALuint filter, ALenum param, const ALint *piValues)
+AL_API ALvoid AL_APIENTRY alFilteriv(ALuint filter, ALenum param, ALint *piValues)
 {
     ALCcontext *Context;
     ALCdevice  *Device;
@@ -190,7 +192,7 @@ AL_API ALvoid AL_APIENTRY alFilteriv(ALuint filter, ALenum param, const ALint *p
     if(!Context) return;
 
     Device = Context->Device;
-    if((ALFilter=LookupFilter(Device, filter)) != NULL)
+    if((ALFilter=LookupFilter(Device->FilterMap, filter)) != NULL)
     {
         /* Call the appropriate handler */
         ALfilter_SetParamiv(ALFilter, Context, param, piValues);
@@ -211,7 +213,7 @@ AL_API ALvoid AL_APIENTRY alFilterf(ALuint filter, ALenum param, ALfloat flValue
     if(!Context) return;
 
     Device = Context->Device;
-    if((ALFilter=LookupFilter(Device, filter)) != NULL)
+    if((ALFilter=LookupFilter(Device->FilterMap, filter)) != NULL)
     {
         /* Call the appropriate handler */
         ALfilter_SetParamf(ALFilter, Context, param, flValue);
@@ -222,7 +224,7 @@ AL_API ALvoid AL_APIENTRY alFilterf(ALuint filter, ALenum param, ALfloat flValue
     ALCcontext_DecRef(Context);
 }
 
-AL_API ALvoid AL_APIENTRY alFilterfv(ALuint filter, ALenum param, const ALfloat *pflValues)
+AL_API ALvoid AL_APIENTRY alFilterfv(ALuint filter, ALenum param, ALfloat *pflValues)
 {
     ALCcontext *Context;
     ALCdevice  *Device;
@@ -232,7 +234,7 @@ AL_API ALvoid AL_APIENTRY alFilterfv(ALuint filter, ALenum param, const ALfloat 
     if(!Context) return;
 
     Device = Context->Device;
-    if((ALFilter=LookupFilter(Device, filter)) != NULL)
+    if((ALFilter=LookupFilter(Device->FilterMap, filter)) != NULL)
     {
         /* Call the appropriate handler */
         ALfilter_SetParamfv(ALFilter, Context, param, pflValues);
@@ -253,7 +255,7 @@ AL_API ALvoid AL_APIENTRY alGetFilteri(ALuint filter, ALenum param, ALint *piVal
     if(!Context) return;
 
     Device = Context->Device;
-    if((ALFilter=LookupFilter(Device, filter)) != NULL)
+    if((ALFilter=LookupFilter(Device->FilterMap, filter)) != NULL)
     {
         switch(param)
         {
@@ -290,7 +292,7 @@ AL_API ALvoid AL_APIENTRY alGetFilteriv(ALuint filter, ALenum param, ALint *piVa
     if(!Context) return;
 
     Device = Context->Device;
-    if((ALFilter=LookupFilter(Device, filter)) != NULL)
+    if((ALFilter=LookupFilter(Device->FilterMap, filter)) != NULL)
     {
         /* Call the appropriate handler */
         ALfilter_GetParamiv(ALFilter, Context, param, piValues);
@@ -311,7 +313,7 @@ AL_API ALvoid AL_APIENTRY alGetFilterf(ALuint filter, ALenum param, ALfloat *pfl
     if(!Context) return;
 
     Device = Context->Device;
-    if((ALFilter=LookupFilter(Device, filter)) != NULL)
+    if((ALFilter=LookupFilter(Device->FilterMap, filter)) != NULL)
     {
         /* Call the appropriate handler */
         ALfilter_GetParamf(ALFilter, Context, param, pflValue);
@@ -332,7 +334,7 @@ AL_API ALvoid AL_APIENTRY alGetFilterfv(ALuint filter, ALenum param, ALfloat *pf
     if(!Context) return;
 
     Device = Context->Device;
-    if((ALFilter=LookupFilter(Device, filter)) != NULL)
+    if((ALFilter=LookupFilter(Device->FilterMap, filter)) != NULL)
     {
         /* Call the appropriate handler */
         ALfilter_GetParamfv(ALFilter, Context, param, pflValues);
@@ -348,11 +350,11 @@ ALfloat lpCoeffCalc(ALfloat g, ALfloat cw)
 {
     ALfloat a = 0.0f;
 
-    /* Be careful with gains < 0.001, as that causes the coefficient head
-     * towards 1, which will flatten the signal */
+    /* Be careful with gains < 0.01, as that causes the coefficient
+     * head towards 1, which will flatten the signal */
     if(g < 0.9999f) /* 1-epsilon */
     {
-        g = maxf(g, 0.001f);
+        g = maxf(g, 0.01f);
         a = (1 - g*cw - aluSqrt(2*g*(1-cw) - g*g*(1 - cw*cw))) /
             (1 - g);
     }
